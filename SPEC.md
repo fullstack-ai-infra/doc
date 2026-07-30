@@ -20,6 +20,16 @@ This document describes the current implementation, not an aspirational API.
 - Encrypted short-lived user tokens for WebSocket authentication
 - Separate internal key for restore operations
 
+### Operations CLI
+
+- Independent `@fullstack-ai-infra/doc-cli` workspace with the `doc` binary
+- Project discovery with explicit `--root` override
+- Private environment initialization with independent generated secrets
+- Docker/Compose/configuration diagnostics with JSON output
+- Isolated Compose lifecycle, status and logs per checkout
+- Explicit loopback-only development schema push
+- No direct document database writes
+
 ## Core records
 
 | Record          | Role                                                                |
@@ -56,5 +66,6 @@ success.
 - The collaboration service needs deeper automated integration tests.
 - API routes do not yet form a versioned public Agent contract.
 - Object storage is coupled to an OSS client and needs a provider interface.
-- Local compose does not yet start the Next.js service automatically.
+- CLI document CRUD and import/export require scoped PATs and a stable `/api/v1`.
+- Production deployments need reviewed Prisma migrations instead of `db push`.
 - Rate limits and audit events are incomplete.

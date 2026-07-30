@@ -11,23 +11,97 @@ services:
       timeout: 3s
       retries: 20
     ports:
-      - '5432:5432'
+      - '127.0.0.1:5432:5432'
     volumes:
       - doc-postgres:/var/lib/postgresql/data
 
   collaboration:
     build:
-      context: ./services/collaboration
+      context: .
+      dockerfile: services/collaboration/Dockerfile
     environment:
       PORT: 1234
       DATABASE_URL: postgresql://doc:doc@postgres:5432/doc?schema=public
-      API_AUTH_KEY: ${COLLABORATE_API_AUTH_KEY:-local-collaboration-token}
-      INTERNAL_API_KEY: ${COLLABORATE_INTERNAL_API_KEY:-local-internal-token}
+      API_AUTH_KEY: ${COLLABORATE_API_AUTH_KEY:?COLLABORATE_API_AUTH_KEY is required}
+      INTERNAL_API_KEY: ${COLLABORATE_INTERNAL_API_KEY:?COLLABORATE_INTERNAL_API_KEY is required}
     depends_on:
       postgres:
         condition: service_healthy
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:1234/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 20
     ports:
-      - '1234:1234'
+      - '127.0.0.1:1234:1234'
+
+  migrate:
+    build:
+      context: .
+      target: migrator
+    command: ['npx', 'prisma', 'db', 'push']
+    environment:
+      DATABASE_URL: postgresql://doc:doc@postgres:5432/doc?schema=public
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: 'no'
+
+  web:
+    build:
+      context: .
+      args:
+        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
+        NEXT_PUBLIC_COLLABORATE_EDIT_URL: ${NEXT_PUBLIC_COLLABORATE_EDIT_URL:-ws://localhost:1234/collaborate}
+        NEXT_PUBLIC_OSS_CDN_HOSTNAME: ${NEXT_PUBLIC_OSS_CDN_HOSTNAME:-}
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://doc:doc@postgres:5432/doc?schema=public
+      AUTH_SECRET: ${AUTH_SECRET:?AUTH_SECRET is required}
+      NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3000}
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
+      AUTH_GITHUB_ID: ${AUTH_GITHUB_ID:-}
+      AUTH_GITHUB_SECRET: ${AUTH_GITHUB_SECRET:-}
+      EMAIL_FROM: ${EMAIL_FROM:-}
+      EMAIL_HOST: ${EMAIL_HOST:-}
+      EMAIL_PORT: ${EMAIL_PORT:-587}
+      EMAIL_PASSWORD: ${EMAIL_PASSWORD:-}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      NOTICE_EMAIL_TO: ${NOTICE_EMAIL_TO:-}
+      OSS_ACCESS_KEY_ID: ${OSS_ACCESS_KEY_ID:-}
+      OSS_ACCESS_KEY_SECRET: ${OSS_ACCESS_KEY_SECRET:-}
+      OSS_REGION: ${OSS_REGION:-}
+      OSS_BUCKET: ${OSS_BUCKET:-}
+      NEXT_PUBLIC_OSS_CDN_HOSTNAME: ${NEXT_PUBLIC_OSS_CDN_HOSTNAME:-}
+      DEEP_SEEK_API_KEY: ${DEEP_SEEK_API_KEY:-}
+      DEEP_BRICKS_API_KEY: ${DEEP_BRICKS_API_KEY:-}
+      COLLABORATE_EDIT_HTTP_URL: http://collaboration:1234
+      COLLABORATE_API_AUTH_KEY: ${COLLABORATE_API_AUTH_KEY:?COLLABORATE_API_AUTH_KEY is required}
+      COLLABORATE_INTERNAL_API_KEY: ${COLLABORATE_INTERNAL_API_KEY:?COLLABORATE_INTERNAL_API_KEY is required}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      collaboration:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3000/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    ports:
+      - '127.0.0.1:3000:3000'
 
 volumes:
   doc-postgres:

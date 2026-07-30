@@ -3,7 +3,7 @@ const websocket = require('koa-easy-ws')
 const bodyParser = require('koa-bodyparser')
 const Router = require('@koa/router')
 const { hocuspocusServer } = require('./hocuspocus')
-const { connect } = require('./db/client')
+const { connect, pgClient } = require('./db/client')
 const { selectOneDocForMonitor } = require('./db/doc')
 const { createCollabRouter } = require('./http/collab-routes')
 require('dotenv').config()
@@ -20,6 +20,28 @@ router.get('/', async (ctx) => {
   ctx.body = {
     service: 'doc-collaboration',
     status: 'ok',
+  }
+})
+
+router.get('/ready', async (ctx) => {
+  try {
+    await pgClient.query('select 1')
+    ctx.body = {
+      service: 'doc-collaboration',
+      status: 'ok',
+      checks: {
+        database: 'ok',
+      },
+    }
+  } catch {
+    ctx.status = 503
+    ctx.body = {
+      service: 'doc-collaboration',
+      status: 'degraded',
+      checks: {
+        database: 'unavailable',
+      },
+    }
   }
 })
 

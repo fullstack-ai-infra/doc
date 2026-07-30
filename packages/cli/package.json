@@ -1,0 +1,30 @@
+{
+  "name": "@fullstack-ai-infra/doc-cli",
+  "version": "0.1.0",
+  "description": "Local operations CLI for the doc document infrastructure.",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "doc": "./bin/doc.js"
+  },
+  "files": [
+    "assets",
+    "bin",
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "check": "node --check bin/doc.js && node --check src/capabilities.js && node --check src/cli.js && node --check src/compose.js && node --check src/doctor.js && node --check src/process.js && node --check src/project.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "keywords": [
+    "documents",
+    "collaboration",
+    "self-hosted",
+    "cli"
+  ],
+  "license": "UNLICENSED"
+}

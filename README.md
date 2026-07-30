@@ -26,8 +26,9 @@
 | ------------------------- | ------------------------------------------ |
 | `src/`                    | Next.js 产品界面、HTTP API、认证与文档能力 |
 | `services/collaboration/` | Hocuspocus/Yjs 实时协作服务                |
+| `packages/cli/`           | `doc` 本地初始化、诊断与服务编排 CLI       |
 | `prisma/`                 | PostgreSQL 文档、权限、发布和版本数据模型  |
-| `docker-compose.yml`      | 本地 PostgreSQL 与协作服务                 |
+| `docker-compose.yml`      | PostgreSQL、迁移、协作与 Web 完整服务栈    |
 | `docs/`                   | 开发、运行与架构说明                       |
 
 ## 当前能力
@@ -39,6 +40,9 @@
 - 文档版本快照、差异查看和恢复
 - AI 续写、总结、大纲、翻译、改写和文档侧边对话
 - 中英文界面、暗色/亮色主题和 GitHub/邮箱认证
+- `doc` CLI：环境初始化、诊断、完整服务栈启停、状态、日志和本地数据库任务
+
+完整的已交付、实验性与暂缺能力见 [docs/CAPABILITIES.md](docs/CAPABILITIES.md)。
 
 ## 架构
 
@@ -73,21 +77,23 @@ UI、API 与协作服务必须共享同一套文档、权限和版本语义。AI
 需要 Node.js 24、npm、Docker 和 Docker Compose。
 
 ```bash
-cp .env.example .env
-npm install
-docker compose up -d postgres collaboration
-npm run db:push
-npm run dev
+npm ci
+npm install --global ./packages/cli
+doc init
+doc doctor
+doc up --build
+doc doctor --live
 ```
 
-打开 <http://localhost:3000>。完整配置和分服务启动方式见
-[docs/RUN_LOCAL.md](docs/RUN_LOCAL.md)。
+打开 <http://localhost:3000>。CLI 契约见 [docs/CLI.md](docs/CLI.md)，完整配置和分服务
+启动方式见 [docs/RUN_LOCAL.md](docs/RUN_LOCAL.md)。
 
 ## 开发
 
 ```bash
 npm run dev                  # Next.js
 npm run dev:collaboration    # collaboration service
+npm run doc -- --help        # repository-local CLI
 npm run test-ci              # unit tests
 npm run check                # format, lint, tests, service syntax and build
 ```
@@ -99,9 +105,9 @@ npm run check                # format, lint, tests, service syntax and build
 
 当前定位是可开发、可自托管的产品基础，而不是稳定发布版。接下来的重点是：
 
-1. 统一 Web 与协作服务的健康检查、鉴权和可观测性。
-2. 把文档 API 收敛为可供 Agent 使用的稳定契约。
-3. 增加可重复的协作、版本恢复与权限回归测试。
-4. 完善对象存储抽象和一键本地部署。
+1. 把文档 API 收敛为可供 Agent 使用的稳定契约，并增加 scoped PAT。
+2. 增加可重复的协作、版本恢复与权限回归测试。
+3. 完善对象存储抽象和生产 migration 工作流。
+4. 在稳定 API 上增加文档 CRUD、版本、发布和 workspace bundle CLI。
 
 安全问题请按 [SECURITY.md](SECURITY.md) 私下报告。

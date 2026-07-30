@@ -4,14 +4,21 @@
   "description": "A portable, self-hosted document plane for people and AI agents.",
   "private": true,
   "packageManager": "npm@11.8.0",
+  "engines": {
+    "node": ">=24.0.0",
+    "npm": ">=11.0.0"
+  },
   "workspaces": [
+    "packages/*",
     "services/*"
   ],
   "scripts": {
     "dev": "next dev",
     "dev:collaboration": "npm run dev --workspace @fullstack-ai-infra/doc-collaboration",
+    "doc": "node packages/cli/bin/doc.js",
     "build": "next build",
     "build:collaboration": "npm run check --workspace @fullstack-ai-infra/doc-collaboration",
+    "check:cli": "npm run check --workspace @fullstack-ai-infra/doc-cli && npm pack --workspace @fullstack-ai-infra/doc-cli --dry-run",
     "start": "next start",
     "start:collaboration": "npm run start --workspace @fullstack-ai-infra/doc-collaboration",
     "lint": "next lint",
@@ -20,8 +27,9 @@
     "prepare": "husky",
     "db:push": "prisma db push",
     "test": "vitest",
-    "test-ci": "vitest run",
-    "check": "npm run format && npm run lint && npm run test-ci && npm run build:collaboration && npm run build"
+    "test:cli": "npm test --workspace @fullstack-ai-infra/doc-cli",
+    "test-ci": "vitest run && npm run test:cli",
+    "check": "npm run format && npm run lint && npm run test-ci && npm run build:collaboration && npm run check:cli && npm run build"
   },
   "dependencies": {
     "@ai-sdk/openai-compatible": "3.0.17",
