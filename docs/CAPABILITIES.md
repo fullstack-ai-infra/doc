@@ -97,7 +97,7 @@ The following capabilities are not claimed:
 
 - Collaboration-aware replacement of existing document content through API v1
 - API/CLI delete, restore, version restore, publish, import, or export
-- Immediate active-connection revocation and a database uniqueness constraint for share recipients
+- Immediate revocation of already-connected collaboration sessions
 - Complete like/unlike persistence, user-level deduplication, and abuse controls
 - Provider-neutral object storage
 - Reviewed production Prisma migrations

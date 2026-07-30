@@ -45,7 +45,7 @@ services:
     build:
       context: .
       target: migrator
-    command: ['npx', 'prisma', 'db', 'push']
+    command: ['npm', 'run', 'db:push']
     environment:
       DATABASE_URL: postgresql://doc:doc@postgres:5432/doc?schema=public
     depends_on:

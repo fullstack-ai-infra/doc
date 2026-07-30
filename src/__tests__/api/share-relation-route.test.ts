@@ -7,7 +7,7 @@ const mocks = vi.hoisted(() => ({
   relationFindFirst: vi.fn(),
   relationCount: vi.fn(),
   relationCreate: vi.fn(),
-  relationDelete: vi.fn(),
+  relationDeleteMany: vi.fn(),
   relationUpdateMany: vi.fn(),
   sendEmail: vi.fn(),
 }))
@@ -26,7 +26,7 @@ vi.mock('@/db/db', () => ({
       findFirst: mocks.relationFindFirst,
       count: mocks.relationCount,
       create: mocks.relationCreate,
-      delete: mocks.relationDelete,
+      deleteMany: mocks.relationDeleteMany,
       updateMany: mocks.relationUpdateMany,
     },
   },
@@ -196,6 +196,59 @@ describe('/api/doc/share-relation permissions', () => {
     })
   })
 
+  it('returns a duplicate error when concurrent creates reach the database constraint', async () => {
+    mocks.docFindFirst
+      .mockResolvedValueOnce({ userId: 'owner', shareRelations: [] })
+      .mockResolvedValueOnce({ userId: 'owner', shareRelations: [] })
+      .mockResolvedValue({ id: 'doc-1', title: 'Private notes' })
+    mocks.userFindUnique.mockResolvedValue({
+      id: 'reader',
+      name: 'Reader',
+      email: 'reader@example.com',
+    })
+    mocks.relationFindFirst.mockResolvedValue(null)
+    mocks.relationCount.mockResolvedValue(0)
+
+    let relationCreated = false
+    mocks.relationCreate.mockImplementation(async () => {
+      await Promise.resolve()
+      if (relationCreated) {
+        throw Object.assign(new Error('Unique constraint failed'), { code: 'P2002' })
+      }
+      relationCreated = true
+      return {
+        id: 'relation-1',
+        docId: 'doc-1',
+        authorId: 'owner',
+        userId: 'reader',
+        access: 'READ',
+        noticeType: 'NEW',
+      }
+    })
+
+    const requests = [
+      POST(
+        jsonRequest('POST', {
+          email: 'reader@example.com',
+          access: 'READ',
+          docId: 'doc-1',
+        })
+      ),
+      POST(
+        jsonRequest('POST', {
+          email: 'reader@example.com',
+          access: 'READ',
+          docId: 'doc-1',
+        })
+      ),
+    ]
+    const payloads = await Promise.all(requests.map(async (request) => (await request).json()))
+
+    expect(payloads.filter((payload) => payload.errno === 0)).toHaveLength(1)
+    expect(payloads.filter((payload) => payload.msg === 'Document is already shared with this user')).toHaveLength(1)
+    expect(mocks.sendEmail).toHaveBeenCalledTimes(1)
+  })
+
   it('does not reveal or delete a relation the user does not own', async () => {
     mocks.relationFindFirst.mockResolvedValue(null)
 
@@ -215,7 +268,28 @@ describe('/api/doc/share-relation permissions', () => {
         },
       })
     )
-    expect(mocks.relationDelete).not.toHaveBeenCalled()
+    expect(mocks.relationDeleteMany).not.toHaveBeenCalled()
+  })
+
+  it('removes every legacy duplicate for the same document and recipient', async () => {
+    mocks.relationFindFirst.mockResolvedValue({
+      id: 'relation-2',
+      docId: 'doc-1',
+      userId: 'reader',
+      doc: { title: 'Private notes' },
+      user: { email: 'reader@example.com' },
+    })
+    mocks.relationDeleteMany.mockResolvedValue({ count: 2 })
+
+    const response = await DELETE(jsonRequest('DELETE', { id: 'relation-2' }))
+
+    expect((await response.json()).errno).toBe(0)
+    expect(mocks.relationDeleteMany).toHaveBeenCalledWith({
+      where: {
+        docId: 'doc-1',
+        userId: 'reader',
+      },
+    })
   })
 
   it('only allows a recipient to acknowledge its own notice as NONE', async () => {

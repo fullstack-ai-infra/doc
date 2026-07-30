@@ -8,6 +8,13 @@ import { DOCUMENT_ACCESS, getDocumentAccess } from '@/lib/document-access'
 import { readJsonBody } from '@/lib/read-json-body'
 
 const MAX_SHARE_REQUEST_BYTES = 16 * 1024
+const DUPLICATE_SHARE_MESSAGE = 'Document is already shared with this user'
+
+function isUniqueConstraintError(error: unknown) {
+  return (
+    typeof error === 'object' && error !== null && 'code' in error && (error as { code?: unknown }).code === 'P2002'
+  )
+}
 
 const createShareRelationSchema = z
   .object({
@@ -70,7 +77,7 @@ export async function POST(request: Request) {
     db.shareRelation.count({ where: { docId } }),
   ])
   if (existingRelation != null) {
-    return Response.json(genErrorData('Document is already shared with this user'))
+    return Response.json(genErrorData(DUPLICATE_SHARE_MESSAGE))
   }
   if (shareCount >= MAX_SHARE_COUNT) {
     return Response.json(genErrorData(`You only can share a document with up to ${MAX_SHARE_COUNT} users`))
@@ -97,6 +104,11 @@ export async function POST(request: Request) {
 
     return Response.json(genSuccessData({ shareRelation, userName: userByEmail.name }))
   } catch (err) {
+    // The schema constraint is the source of truth when two requests pass the optimistic
+    // existence check concurrently.
+    if (isUniqueConstraintError(err)) {
+      return Response.json(genErrorData(DUPLICATE_SHARE_MESSAGE))
+    }
     console.log('Create share relation error ', err)
     return Response.json(genErrorData('Something went wrong, try again please.'))
   }
@@ -121,6 +133,8 @@ export async function DELETE(request: Request) {
     },
     select: {
       id: true,
+      docId: true,
+      userId: true,
       doc: {
         select: { title: true },
       },
@@ -134,8 +148,13 @@ export async function DELETE(request: Request) {
   }
 
   try {
-    await db.shareRelation.delete({
-      where: { id: relation.id },
+    // Delete by the grant identity rather than one row ID so old db-push installations cannot
+    // retain access through a duplicate relation.
+    await db.shareRelation.deleteMany({
+      where: {
+        docId: relation.docId,
+        userId: relation.userId,
+      },
     })
 
     void sendEmail({

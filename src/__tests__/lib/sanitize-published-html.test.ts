@@ -18,9 +18,10 @@ describe('sanitizePublishedHtml', () => {
       '</div>',
       '<div data-type="mermaid-block" data-code="graph TD; A--&gt;B"></div>',
       '<div style="width: 50%; margin: 0 auto">',
-      '<img src="https://assets.example/runbook.png" data-width="50%" alt="Diagram">',
+      '<img src="https://assets.example/runbook.png" data-width="50%" data-ratio="1.5" data-align="center" alt="Diagram">',
       '</div>',
-      '<input type="checkbox" checked>',
+      '<ul data-type="taskList"><li data-checked="true"><input type="checkbox" checked><p>Done</p></li></ul>',
+      '<mark data-color="#ffff00" style="background-color:#ffff00">Important</mark>',
       '<a href="https://example.com" target="_blank">Reference</a>',
     ].join('')
 
@@ -31,9 +32,37 @@ describe('sanitizePublishedHtml', () => {
     expect(result).toContain('data-type="mermaid-block"')
     expect(result).toContain('data-code="graph TD; A--&gt;B"')
     expect(result).toContain('src="https://assets.example/runbook.png"')
+    expect(result).toContain('class="layout-two-column with-border-true"')
+    expect(result).toContain('data-type="taskList"')
+    expect(result).toContain('data-checked="true"')
+    expect(result).toContain('data-width="50%"')
+    expect(result).toContain('data-ratio="1.5"')
+    expect(result).toContain('data-align="center"')
+    expect(result).toContain('data-color="#ffff00"')
     expect(result).toContain('type="checkbox"')
     expect(result).toContain('disabled')
     expect(result).toContain('rel="noopener noreferrer"')
+  })
+
+  it('removes arbitrary utility classes and data attributes that can visually replace the public page', () => {
+    const result = sanitizePublishedHtml(
+      [
+        '<div class="layout-two-column with-border-true fixed inset-0 z-50 pointer-events-auto hidden bg-white" ',
+        'data-type="columns" data-layout="two-column" data-with-border="true" ',
+        'data-state="open" data-evil="overlay">',
+        '<p class="absolute top-0 h-screen w-screen" data-testid="spoof">Trusted-looking prompt</p>',
+        '</div>',
+      ].join('')
+    )
+
+    expect(result).toContain('class="layout-two-column with-border-true"')
+    expect(result).toContain('data-type="columns"')
+    expect(result).toContain('data-layout="two-column"')
+    expect(result).toContain('data-with-border="true"')
+    expect(result).not.toMatch(
+      /\b(?:fixed|inset-0|z-50|pointer-events-auto|hidden|bg-white|absolute|top-0|h-screen|w-screen)\b/
+    )
+    expect(result).not.toMatch(/data-(?:state|evil|testid)=/)
   })
 
   it('removes executable markup, event handlers, unsafe URLs, and dangerous styles', () => {

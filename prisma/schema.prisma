@@ -163,6 +163,8 @@ model ShareRelation {
   user       User       @relation(fields: [userId], references: [id], name: "shareRelations")
   access     AccessType @default(READ)
   noticeType NoticeType @default(NEW)
+
+  @@unique([docId, userId])
 }
 
 enum AccessType {

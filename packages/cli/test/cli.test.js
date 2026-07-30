@@ -1088,6 +1088,25 @@ test('API errors, malformed responses, size limits, and timeouts are stable and 
   })
   assert.equal(unauthorized.stderr.includes(token), false)
 
+  const terminalInjection = await invoke(['ls'], {
+    ...baseOptions,
+    fetch: async () =>
+      apiResponse(
+        {
+          error: {
+            code: 'server_error',
+            message: `failure\u001b]52;c;Y2xpcGJvYXJk\u0007\u202eevil`,
+          },
+          requestId: `request\u001b[31m-red\u001b[0m\u2066`,
+        },
+        { status: 500 }
+      ),
+  })
+  assert.equal(terminalInjection.code, 1)
+  assert.doesNotMatch(terminalInjection.stderr, /[\u0000-\u0009\u000b-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/)
+  assert.match(terminalInjection.stderr, /error: failure\]52;c;Y2xpcGJvYXJkevil/)
+  assert.match(terminalInjection.stderr, /request id: request\[31m-red\[0m/)
+
   const malformed = await invoke(['ls', '--json'], {
     ...baseOptions,
     fetch: async () => new Response('not json', { status: 200 }),

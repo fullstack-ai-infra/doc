@@ -1069,7 +1069,7 @@ export async function runCli(argv, overrides = {}) {
             exitCode: EXIT.usage,
           })
         )
-      } else write(stderr, `error: ${error.message}`)
+      } else write(stderr, `error: ${compactText(error.message)}`)
       return EXIT.usage
     }
     if (argv.includes('--json')) {
@@ -1084,8 +1084,8 @@ export async function runCli(argv, overrides = {}) {
         })
       )
     } else {
-      write(stderr, `error: ${error.message}`)
-      if (error.requestId) write(stderr, `request id: ${error.requestId}`)
+      write(stderr, `error: ${compactText(error.message)}`)
+      if (error.requestId) write(stderr, `request id: ${compactText(error.requestId)}`)
     }
     return EXIT.failure
   }

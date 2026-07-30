@@ -28,7 +28,7 @@ export const capabilityGroups = [
         name: 'Document sharing',
         status: 'experimental',
         detail:
-          'Owner-scoped read/write relations and notifications exist; active WebSocket revocation and a database uniqueness constraint remain.',
+          'Owner-scoped, database-unique read/write relations and notifications exist; active WebSocket revocation remains.',
       },
       {
         id: 'publishing',

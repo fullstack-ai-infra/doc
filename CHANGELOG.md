@@ -38,3 +38,9 @@ All notable changes to `doc` are documented here.
   from trusting forwarded origin headers.
 - Bounded token, sharing, and publishing mutation bodies, kept internal-key checks constant-time,
   and stopped publication storage errors from reaching clients.
+- Made document-share creation concurrency-safe and ensured revocation removes legacy duplicate
+  grants before enforcing their database uniqueness constraint.
+- Bounded and validated the legacy document-create route, storing canonical TipTap JSON together
+  with matching Yjs state for new content.
+- Restricted published HTML classes and data attributes to the product's explicit TipTap feature
+  set, and neutralized terminal control sequences in human-readable CLI errors.

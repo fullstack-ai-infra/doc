@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { TiptapTransformer } from '@hocuspocus/transformer'
+import * as Y from 'yjs'
 
 const mocks = vi.hoisted(() => ({
   getUserInfo: vi.fn(),
@@ -33,6 +35,12 @@ function createRequest(body: unknown) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   })
+}
+
+function decodeStoredDocument(contentBinary: Buffer) {
+  const ydoc = new Y.Doc()
+  Y.applyUpdate(ydoc, contentBinary)
+  return TiptapTransformer.fromYdoc(ydoc, 'default')
 }
 
 describe('POST /api/doc permissions', () => {
@@ -128,5 +136,125 @@ describe('POST /api/doc permissions', () => {
         userId: 'owner',
       },
     })
+  })
+
+  it('creates Web documents with canonical TipTap JSON and matching Yjs state', async () => {
+    mocks.count.mockResolvedValue(0)
+    mocks.getNextSortOrderForParent.mockResolvedValue(1024)
+    mocks.create.mockResolvedValue({ id: 'new-doc', title: '' })
+
+    const response = await POST(createRequest({ id: 'new-doc', parentId: null }))
+
+    expect((await response.json()).errno).toBe(0)
+    const createCall = mocks.create.mock.calls[0][0]
+    const storedContent = JSON.parse(createCall.data.content)
+    expect(storedContent).toMatchObject({
+      type: 'doc',
+      content: [{ type: 'paragraph' }],
+    })
+    expect(createCall.data.contentBinary).toBeInstanceOf(Buffer)
+    expect(createCall.data.contentBinary.byteLength).toBeGreaterThan(0)
+    expect(decodeStoredDocument(createCall.data.contentBinary)).toEqual(storedContent)
+  })
+
+  it('accepts legacy JSON-string content and canonicalizes it into matching Yjs state', async () => {
+    mocks.count.mockResolvedValue(0)
+    mocks.getNextSortOrderForParent.mockResolvedValue(1024)
+    mocks.create.mockResolvedValue({ id: 'new-doc', title: 'Imported' })
+    const content = JSON.stringify({
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [{ type: 'text', text: 'Imported text' }],
+        },
+      ],
+    })
+
+    const response = await POST(createRequest({ title: 'Imported', content }))
+
+    expect((await response.json()).errno).toBe(0)
+    const createCall = mocks.create.mock.calls[0][0]
+    const storedContent = JSON.parse(createCall.data.content)
+    expect(storedContent).toMatchObject({
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [{ type: 'text', text: 'Imported text' }],
+        },
+      ],
+    })
+    expect(decodeStoredDocument(createCall.data.contentBinary)).toEqual(storedContent)
+  })
+
+  it('rejects request bodies larger than the legacy create limit before querying documents', async () => {
+    const response = await POST(createRequest({ title: 'x'.repeat(1024 * 1024) }))
+
+    expect(response.status).toBe(413)
+    await expect(response.json()).resolves.toEqual({
+      errno: -1,
+      msg: 'Create payload too large',
+    })
+    expect(mocks.count).not.toHaveBeenCalled()
+    expect(mocks.create).not.toHaveBeenCalled()
+  })
+
+  it('rejects unknown create fields without querying documents', async () => {
+    const response = await POST(createRequest({ title: 'Strict', unexpected: true }))
+
+    expect(response.status).toBe(400)
+    await expect(response.json()).resolves.toEqual({
+      errno: -1,
+      msg: 'Create payload invalid',
+    })
+    expect(mocks.count).not.toHaveBeenCalled()
+    expect(mocks.create).not.toHaveBeenCalled()
+  })
+
+  it('rejects unsupported or unsafe TipTap content without creating a document', async () => {
+    mocks.count.mockResolvedValue(0)
+
+    const unsupportedResponse = await POST(
+      createRequest({
+        title: 'Unsupported',
+        content: {
+          type: 'doc',
+          content: [{ type: 'script', content: [{ type: 'text', text: 'bad' }] }],
+        },
+      })
+    )
+    expect(unsupportedResponse.status).toBe(422)
+    await expect(unsupportedResponse.json()).resolves.toEqual({
+      errno: -1,
+      msg: 'Document content unsupported',
+    })
+
+    const unsafeResponse = await POST(
+      createRequest({
+        title: 'Unsafe',
+        content: {
+          type: 'doc',
+          content: [
+            {
+              type: 'paragraph',
+              content: [
+                {
+                  type: 'text',
+                  text: 'click',
+                  marks: [{ type: 'link', attrs: { href: 'javascript:alert(1)' } }],
+                },
+              ],
+            },
+          ],
+        },
+      })
+    )
+    expect(unsafeResponse.status).toBe(422)
+    await expect(unsafeResponse.json()).resolves.toEqual({
+      errno: -1,
+      msg: 'Document content invalid',
+    })
+    expect(mocks.create).not.toHaveBeenCalled()
   })
 })

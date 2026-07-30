@@ -22,7 +22,7 @@ RUN apk add --no-cache openssl
 FROM prisma-base AS migrator
 WORKDIR /app
 COPY prisma ./prisma
-CMD ["npx", "prisma", "db", "push"]
+CMD ["npm", "run", "db:push"]
 
 # Rebuild the source code only when needed
 FROM prisma-base AS builder

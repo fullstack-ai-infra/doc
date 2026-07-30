@@ -36,14 +36,55 @@ export function sanitizePublishedHtml(value: unknown) {
       'u',
     ],
     allowedAttributes: {
-      '*': ['class', 'data-*', 'style'],
+      '*': ['style'],
       a: ['href', 'target', 'rel', 'title'],
       col: ['span', 'width'],
-      img: ['src', 'alt', 'title', 'width', 'height', 'data-*'],
+      div: [
+        {
+          name: 'data-type',
+          values: ['column', 'columns', 'horizontalRule', 'mermaid-block'],
+        },
+        {
+          name: 'data-layout',
+          values: ['sidebar-left', 'sidebar-right', 'two-column'],
+        },
+        {
+          name: 'data-with-border',
+          values: ['false', 'true'],
+        },
+        {
+          name: 'data-position',
+          values: ['left', 'right'],
+        },
+        'data-code',
+      ],
+      img: ['src', 'alt', 'title', 'width', 'height', 'data-width', 'data-ratio', 'data-align'],
       input: ['type', 'checked', 'disabled'],
+      li: [
+        {
+          name: 'data-checked',
+          values: ['false', 'true'],
+        },
+      ],
+      mark: ['data-color'],
       ol: ['start', 'type'],
       td: ['colspan', 'rowspan'],
       th: ['colspan', 'rowspan', 'scope'],
+      ul: [
+        {
+          name: 'data-type',
+          values: ['taskList'],
+        },
+      ],
+    },
+    allowedClasses: {
+      div: [
+        'layout-sidebar-left',
+        'layout-sidebar-right',
+        'layout-two-column',
+        'with-border-false',
+        'with-border-true',
+      ],
     },
     allowedSchemes: ['http', 'https', 'mailto'],
     allowedSchemesByTag: {

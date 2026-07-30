@@ -32,7 +32,8 @@ npm run doc -- dev
 ```
 
 This starts PostgreSQL and collaboration in containers, applies the local Prisma schema, and runs
-the Web app in development mode.
+the Web app in development mode. Schema application includes a compatibility preflight that
+deduplicates legacy document grants before enforcing their database uniqueness constraint.
 
 ## Run the full container stack
 
