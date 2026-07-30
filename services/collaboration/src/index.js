@@ -5,7 +5,7 @@ const Router = require('@koa/router')
 const { hocuspocusServer } = require('./hocuspocus')
 const { connect, pgClient } = require('./db/client')
 const { selectOneDocForMonitor } = require('./db/doc')
-const { createCollabRouter } = require('./http/collab-routes')
+const { createCollabRouter, hasValidInternalKey } = require('./http/collab-routes')
 require('dotenv').config()
 
 const app = new Koa()
@@ -47,6 +47,15 @@ router.get('/ready', async (ctx) => {
 
 //【注意】心跳检测 monitor 会检测，不要随意修改！
 router.get('/selectOneDoc', async (ctx) => {
+  if (!hasValidInternalKey(ctx)) {
+    ctx.status = 401
+    ctx.body = {
+      success: false,
+      msg: 'unauthorized',
+    }
+    return
+  }
+
   const doc = await selectOneDocForMonitor()
   ctx.body = doc // 格式如 {"id":"xxxx"}
 })

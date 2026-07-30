@@ -1,5 +1,5 @@
 /**
- *  时间格式化（ChatGPT 生成的）
+ * 时间格式化
  * @param timeString time string to format
  * @param isZhCN locale - is zh-cn
  * @param current current dateTime - unit testing needs to pass a fixed value

@@ -8,10 +8,7 @@ export async function getDoc(id: string) {
   return data
 }
 
-async function updateDoc(
-  id: string,
-  data: { title?: string; icon?: string | null; content?: string; isStar?: boolean }
-) {
+async function updateDoc(id: string, data: { title?: string; icon?: string | null; isStar?: boolean }) {
   const url = `/api/doc/${id}`
   const res = await patch(url, data)
   return res

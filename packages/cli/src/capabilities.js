@@ -28,14 +28,14 @@ export const capabilityGroups = [
         name: 'Document sharing',
         status: 'experimental',
         detail:
-          'Read/write share relations and notifications exist, but owner checks on relation mutations still need hardening.',
+          'Owner-scoped read/write relations and notifications exist; active WebSocket revocation and a database uniqueness constraint remain.',
       },
       {
         id: 'publishing',
         name: 'Publishing',
         status: 'experimental',
         detail:
-          'Public links, moderation state, public reading, republish/unpublish, and PDF export exist, but publication creation needs an owner check.',
+          'Owner-scoped public links, moderation, republish/unpublish, allowlist HTML sanitization, public reading, and PDF export.',
       },
     ],
   },
@@ -54,7 +54,7 @@ export const capabilityGroups = [
         name: 'End-to-end collaboration authorization',
         status: 'experimental',
         detail:
-          'The WebSocket layer checks short-lived tokens and document access, but upstream share mutations need owner hardening.',
+          'HTTP and WebSocket entry points enforce active owner/read/write access; connected clients are not yet evicted immediately after revocation.',
       },
       {
         id: 'integration-tests',
@@ -91,14 +91,22 @@ export const capabilityGroups = [
         id: 'authentication',
         name: 'Authentication',
         status: 'available',
-        detail: 'GitHub OAuth plus development SMTP and production Resend email sign-in.',
+        detail:
+          'GitHub OAuth, email sign-in, and scoped personal access tokens with expiry, revocation, and one-time secret display.',
+      },
+      {
+        id: 'agent-api',
+        name: 'Document API v1',
+        status: 'available',
+        detail:
+          'Bearer-only token inspection, owner listing, authorized reads, canonical creation, and ETag-guarded metadata updates.',
       },
       {
         id: 'document-authorization',
         name: 'Document, share, and publishing authorization',
         status: 'experimental',
         detail:
-          'Ownership and read/write relations exist, but single-document reads, share mutations, and publication creation need hardening.',
+          'Legacy browser routes, API v1, publication, and collaboration entry points enforce persisted ownership and read/write relations.',
       },
       {
         id: 'admin',
@@ -135,7 +143,7 @@ export const capabilityGroups = [
         name: 'doc CLI',
         status: 'available',
         detail:
-          'Initialize configuration, diagnose dependencies, manage the stack, inspect logs, and run database tasks.',
+          'Authenticate with scoped PATs; list, read, create, and safely update documents; operate and diagnose the local stack.',
       },
       {
         id: 'health',

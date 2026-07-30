@@ -1,9 +1,13 @@
 import assert from 'node:assert/strict'
+import { EventEmitter } from 'node:events'
 import { chmod, mkdtemp, mkdir, readFile, realpath, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
+import { Readable } from 'node:stream'
 import test from 'node:test'
 import { runCli } from '../src/cli.js'
+import { resolveConfigPaths } from '../src/config.js'
+import { readSecretToken } from '../src/input.js'
 import { parseEnv } from '../src/project.js'
 
 function outputStream() {
@@ -84,11 +88,55 @@ async function invoke(args, options = {}) {
     runner: options.runner,
     fetch: options.fetch,
     env: options.env ?? {},
+    stdin: options.stdin,
+    readToken: options.readToken,
+    homeDirectory: options.homeDirectory,
+    apiTimeoutMs: options.apiTimeoutMs,
+    apiMaxResponseBytes: options.apiMaxResponseBytes,
     platform: options.platform,
     stdout,
     stderr,
   })
   return { code, stdout: stdout.read(), stderr: stderr.read() }
+}
+
+async function createConfigHome() {
+  return mkdtemp(join(tmpdir(), 'doc-cli-config-'))
+}
+
+function apiResponse(data, options = {}) {
+  return new Response(JSON.stringify(data), {
+    status: options.status || 200,
+    headers: {
+      'content-type': 'application/json',
+      ...(options.headers || {}),
+    },
+  })
+}
+
+function authenticatedResponse(userId = 'user-1') {
+  return apiResponse({
+    data: {
+      authenticated: true,
+      userId,
+      scopes: ['documents:read', 'documents:write'],
+    },
+  })
+}
+
+function documentDto(overrides = {}) {
+  return {
+    id: 'doc-1',
+    title: 'Example',
+    icon: null,
+    parentId: null,
+    starred: false,
+    deleted: false,
+    access: 'owner',
+    createdAt: '2026-07-30T00:00:00.000Z',
+    updatedAt: '2026-07-30T00:00:00.000Z',
+    ...overrides,
+  }
 }
 
 test('help exposes the operator command surface', async () => {
@@ -440,4 +488,633 @@ test('child process failures are normalized to the public exit-code contract', a
 
   assert.equal(failed.code, 1)
   assert.equal(missing.code, 5)
+})
+
+test('config path precedence follows DOC_CONFIG_HOME, XDG_CONFIG_HOME, then the user config directory', () => {
+  const explicitHome = resolve(tmpdir(), 'private-doc-config')
+  const xdgHome = resolve(tmpdir(), 'private-xdg')
+  const userHome = resolve(tmpdir(), 'users-doc')
+  assert.equal(
+    resolveConfigPaths({ DOC_CONFIG_HOME: explicitHome, XDG_CONFIG_HOME: resolve(tmpdir(), 'ignored') }, userHome).file,
+    join(explicitHome, 'config.json')
+  )
+  assert.equal(resolveConfigPaths({ XDG_CONFIG_HOME: xdgHome }, userHome).file, join(xdgHome, 'doc', 'config.json'))
+  assert.equal(resolveConfigPaths({}, userHome).file, join(userHome, '.config', 'doc', 'config.json'))
+  assert.throws(
+    () => resolveConfigPaths({ DOC_CONFIG_HOME: '.doc-credentials' }, userHome),
+    /DOC_CONFIG_HOME must be an absolute path/
+  )
+  assert.throws(
+    () => resolveConfigPaths({ XDG_CONFIG_HOME: '.config' }, userHome),
+    /XDG_CONFIG_HOME must be an absolute path/
+  )
+})
+
+test('auth login reads a token outside argv and writes private atomic configuration', async () => {
+  const configHome = join(await createConfigHome(), 'credentials')
+  const token = 'doc_pat_login_secret'
+  const result = await invoke(['auth', 'login', '--url', 'https://docs.example.com', '--json'], {
+    cwd: tmpdir(),
+    env: { DOC_CONFIG_HOME: configHome },
+    readToken: async () => token,
+    fetch: async (url) => {
+      assert.equal(String(url), 'https://docs.example.com/api/v1/me')
+      return authenticatedResponse()
+    },
+  })
+
+  assert.equal(result.code, 0)
+  assert.equal(JSON.parse(result.stdout).authenticated, true)
+  assert.equal(JSON.parse(result.stdout).userId, 'user-1')
+  assert.equal(result.stdout.includes(token), false)
+  assert.equal(result.stderr.includes(token), false)
+  assert.equal((await stat(configHome)).mode & 0o777, 0o700)
+  assert.equal((await stat(join(configHome, 'config.json'))).mode & 0o777, 0o600)
+  const config = JSON.parse(await readFile(join(configHome, 'config.json'), 'utf8'))
+  assert.deepEqual(config, {
+    schemaVersion: 1,
+    url: 'https://docs.example.com',
+    token,
+  })
+})
+
+test('auth login verifies the token before creating or replacing saved credentials', async () => {
+  const invalidToken = 'doc_pat_invalid_login'
+  const absentConfigHome = join(await createConfigHome(), 'absent')
+  const invalid = await invoke(['auth', 'login', '--url', 'https://docs.example.com', '--json'], {
+    cwd: tmpdir(),
+    env: { DOC_CONFIG_HOME: absentConfigHome },
+    readToken: async () => invalidToken,
+    fetch: async () =>
+      apiResponse(
+        {
+          error: {
+            code: 'invalid_token',
+            message: `Invalid token ${invalidToken}`,
+          },
+          requestId: 'login-invalid',
+        },
+        { status: 401 }
+      ),
+  })
+
+  assert.equal(invalid.code, 1)
+  assert.equal(invalid.stdout, '')
+  assert.equal(invalid.stderr.includes(invalidToken), false)
+  await assert.rejects(readFile(join(absentConfigHome, 'config.json'), 'utf8'), { code: 'ENOENT' })
+
+  const existingConfigHome = join(await createConfigHome(), 'existing')
+  await invoke(['auth', 'login', '--url', 'https://old.example.com'], {
+    cwd: tmpdir(),
+    env: { DOC_CONFIG_HOME: existingConfigHome },
+    readToken: async () => 'doc_pat_existing',
+    fetch: async () => authenticatedResponse('existing-user'),
+  })
+  const before = await readFile(join(existingConfigHome, 'config.json'), 'utf8')
+  const replacement = await invoke(['auth', 'login', '--url', 'https://new.example.com'], {
+    cwd: tmpdir(),
+    env: { DOC_CONFIG_HOME: existingConfigHome },
+    readToken: async () => invalidToken,
+    fetch: async () => apiResponse({ error: { code: 'invalid_token', message: 'Unauthorized' } }, { status: 401 }),
+  })
+
+  assert.equal(replacement.code, 1)
+  assert.equal(await readFile(join(existingConfigHome, 'config.json'), 'utf8'), before)
+})
+
+test('auth login reads non-TTY stdin and never accepts a token option', async () => {
+  const configHome = join(await createConfigHome(), 'credentials')
+  const piped = await invoke(['auth', 'login', '--url', 'http://localhost:3000'], {
+    cwd: tmpdir(),
+    env: { DOC_CONFIG_HOME: configHome },
+    stdin: Readable.from(['doc_pat_from_stdin\n']),
+    fetch: async () => authenticatedResponse(),
+  })
+  assert.equal(piped.code, 0)
+
+  const rejected = await invoke(
+    ['auth', 'login', '--url', 'https://docs.example.com', '--token', 'must-not-enter-argv'],
+    {
+      cwd: tmpdir(),
+      env: { DOC_CONFIG_HOME: join(await createConfigHome(), 'credentials') },
+      readToken: async () => {
+        throw new Error('should not read token')
+      },
+    }
+  )
+  assert.equal(rejected.code, 2)
+  assert.match(rejected.stderr, /Unknown option: --token/)
+})
+
+test('auth login refuses plaintext credential persistence on Windows', async () => {
+  let fetched = false
+  const result = await invoke(['auth', 'login', '--url', 'https://docs.example.com'], {
+    cwd: tmpdir(),
+    platform: 'win32',
+    env: { DOC_CONFIG_HOME: join(await createConfigHome(), 'credentials') },
+    readToken: async () => 'doc_pat_windows',
+    fetch: async () => {
+      fetched = true
+    },
+  })
+
+  assert.equal(result.code, 2)
+  assert.match(result.stderr, /not supported on Windows/)
+  assert.equal(fetched, false)
+})
+
+test('interactive token input disables echo and restores terminal raw mode', async () => {
+  class FakeTty extends EventEmitter {
+    isTTY = true
+    isRaw = false
+    rawModes = []
+
+    setEncoding() {}
+
+    setRawMode(value) {
+      this.isRaw = value
+      this.rawModes.push(value)
+    }
+
+    resume() {}
+
+    pause() {}
+  }
+
+  const stdin = new FakeTty()
+  const prompt = outputStream()
+  const tokenPromise = readSecretToken(stdin, prompt)
+  stdin.emit('data', 'doc_pat_hidden')
+  stdin.emit('data', '\r')
+
+  assert.equal(await tokenPromise, 'doc_pat_hidden')
+  assert.deepEqual(stdin.rawModes, [true, false])
+  assert.equal(prompt.read(), 'API token: \n')
+  assert.equal(prompt.read().includes('doc_pat_hidden'), false)
+})
+
+test('auth status redacts tokens and logout removes only the saved token', async () => {
+  const configHome = join(await createConfigHome(), 'credentials')
+  const token = 'doc_pat_status_secret'
+  await invoke(['auth', 'login', '--url', 'https://docs.example.com'], {
+    cwd: tmpdir(),
+    env: { DOC_CONFIG_HOME: configHome },
+    readToken: async () => token,
+    fetch: async () => authenticatedResponse(),
+  })
+
+  const statusResult = await invoke(['auth', 'status', '--json'], {
+    cwd: tmpdir(),
+    env: { DOC_CONFIG_HOME: configHome },
+    fetch: async (url) => {
+      assert.equal(String(url), 'https://docs.example.com/api/v1/me')
+      return authenticatedResponse()
+    },
+  })
+  const statusPayload = JSON.parse(statusResult.stdout)
+  assert.equal(statusResult.code, 0)
+  assert.equal(statusPayload.authenticated, true)
+  assert.equal(statusPayload.userId, 'user-1')
+  assert.deepEqual(statusPayload.scopes, ['documents:read', 'documents:write'])
+  assert.equal(statusPayload.tokenSource, 'config')
+  assert.equal(statusResult.stdout.includes(token), false)
+
+  const logoutResult = await invoke(['auth', 'logout', '--json'], {
+    cwd: tmpdir(),
+    env: { DOC_CONFIG_HOME: configHome },
+  })
+  assert.equal(logoutResult.code, 0)
+  assert.equal(JSON.parse(logoutResult.stdout).removed, true)
+  assert.deepEqual(JSON.parse(await readFile(join(configHome, 'config.json'), 'utf8')), {
+    schemaVersion: 1,
+    url: 'https://docs.example.com',
+  })
+})
+
+test('auth status honors complete environment credentials without reading broken saved config', async () => {
+  const configHome = join(await createConfigHome(), 'credentials')
+  await mkdir(configHome, { mode: 0o700 })
+  await writeFile(join(configHome, 'config.json'), '{broken', { mode: 0o600 })
+
+  const result = await invoke(['auth', 'status', '--json'], {
+    cwd: tmpdir(),
+    env: {
+      DOC_CONFIG_HOME: configHome,
+      DOC_API_URL: 'https://environment.example.com',
+      DOC_API_TOKEN: 'doc_pat_environment',
+    },
+    fetch: async (_url, options) => {
+      assert.equal(options.headers.authorization, 'Bearer doc_pat_environment')
+      return authenticatedResponse()
+    },
+  })
+
+  assert.equal(result.code, 0)
+  assert.equal(JSON.parse(result.stdout).tokenSource, 'environment')
+})
+
+test('auth and remote commands reject symbolic links and non-private configuration', async () => {
+  const parent = await createConfigHome()
+  const target = join(parent, 'target')
+  const linked = join(parent, 'linked')
+  await mkdir(target, { mode: 0o700 })
+  await symlink(target, linked)
+  const symlinkResult = await invoke(['auth', 'status'], {
+    cwd: tmpdir(),
+    env: { DOC_CONFIG_HOME: linked },
+  })
+  assert.equal(symlinkResult.code, 2)
+  assert.match(symlinkResult.stderr, /must not be a symbolic link/)
+
+  const insecure = join(await createConfigHome(), 'credentials')
+  await mkdir(insecure, { mode: 0o700 })
+  await writeFile(
+    join(insecure, 'config.json'),
+    JSON.stringify({ schemaVersion: 1, url: 'https://docs.example.com', token: 'doc_pat_insecure' }),
+    { mode: 0o644 }
+  )
+  const insecureResult = await invoke(['ls'], {
+    cwd: tmpdir(),
+    env: { DOC_CONFIG_HOME: insecure },
+  })
+  assert.equal(insecureResult.code, 2)
+  assert.match(insecureResult.stderr, /mode 0600/)
+})
+
+test('remote credential precedence is explicit URL, environment URL, then saved configuration', async () => {
+  const configHome = join(await createConfigHome(), 'credentials')
+  await invoke(['auth', 'login', '--url', 'https://config.example.com'], {
+    cwd: tmpdir(),
+    env: { DOC_CONFIG_HOME: configHome },
+    readToken: async () => 'doc_pat_config',
+    fetch: async () => authenticatedResponse(),
+  })
+
+  const calls = []
+  const result = await invoke(['ls', '--url', 'https://argument.example.com', '--json'], {
+    cwd: tmpdir(),
+    env: {
+      DOC_CONFIG_HOME: configHome,
+      DOC_API_URL: 'https://environment.example.com',
+      DOC_API_TOKEN: 'doc_pat_environment',
+    },
+    fetch: async (url, options) => {
+      calls.push({ url: String(url), options })
+      return apiResponse({ data: [], meta: { nextCursor: null } })
+    },
+  })
+
+  assert.equal(result.code, 0)
+  assert.equal(calls[0].url, 'https://argument.example.com/api/v1/documents')
+  assert.equal(calls[0].options.headers.authorization, 'Bearer doc_pat_environment')
+  assert.equal(calls[0].options.redirect, 'error')
+})
+
+test('never sends a saved token to a different selected origin', async () => {
+  const configHome = join(await createConfigHome(), 'credentials')
+  const savedToken = 'doc_pat_saved_production'
+  await invoke(['auth', 'login', '--url', 'https://production.example.com'], {
+    cwd: tmpdir(),
+    env: { DOC_CONFIG_HOME: configHome },
+    readToken: async () => savedToken,
+    fetch: async () => authenticatedResponse(),
+  })
+
+  let fetched = false
+  const result = await invoke(['ls', '--url', 'https://other.example.com', '--json'], {
+    cwd: tmpdir(),
+    env: { DOC_CONFIG_HOME: configHome },
+    fetch: async () => {
+      fetched = true
+    },
+  })
+
+  assert.equal(result.code, 2)
+  assert.equal(fetched, false)
+  assert.equal(result.stderr.includes(savedToken), false)
+  assert.match(JSON.parse(result.stderr).error, /different origin/)
+})
+
+test('remote commands work outside a checkout and list encodes filters with stable JSON', async () => {
+  const calls = []
+  const listedDocument = documentDto({
+    title: 'Design notes',
+  })
+  const result = await invoke(
+    ['ls', '--query', 'design notes', '--starred', '--trash', '--limit', '25', '--cursor', 'next/value', '--json'],
+    {
+      cwd: await mkdtemp(join(tmpdir(), 'not-a-doc-checkout-')),
+      env: {
+        DOC_API_URL: 'http://localhost:3000',
+        DOC_API_TOKEN: 'doc_pat_list',
+      },
+      fetch: async (url, options) => {
+        calls.push({ url: String(url), options })
+        return apiResponse({
+          data: [listedDocument],
+          meta: { nextCursor: 'page-2' },
+        })
+      },
+    }
+  )
+
+  assert.equal(result.code, 0)
+  const requestUrl = new URL(calls[0].url)
+  assert.equal(requestUrl.pathname, '/api/v1/documents')
+  assert.equal(requestUrl.searchParams.get('query'), 'design notes')
+  assert.equal(requestUrl.searchParams.get('starred'), 'true')
+  assert.equal(requestUrl.searchParams.get('trash'), 'true')
+  assert.equal(requestUrl.searchParams.get('limit'), '25')
+  assert.equal(requestUrl.searchParams.get('cursor'), 'next/value')
+  assert.deepEqual(JSON.parse(result.stdout), {
+    schemaVersion: 1,
+    documents: [listedDocument],
+    meta: { nextCursor: 'page-2' },
+  })
+})
+
+test('remote commands require credentials and reject non-loopback plain HTTP before fetch', async () => {
+  let fetched = false
+  const missing = await invoke(['ls', '--json'], {
+    cwd: tmpdir(),
+    env: { DOC_CONFIG_HOME: join(await createConfigHome(), 'missing') },
+    fetch: async () => {
+      fetched = true
+    },
+  })
+  assert.equal(missing.code, 2)
+  assert.equal(fetched, false)
+
+  const insecure = await invoke(['ls', '--url', 'http://docs.example.com', '--json'], {
+    cwd: tmpdir(),
+    env: { DOC_API_TOKEN: 'doc_pat_insecure_url' },
+    fetch: async () => {
+      fetched = true
+    },
+  })
+  assert.equal(insecure.code, 2)
+  assert.equal(JSON.parse(insecure.stderr).code, 'insecure_api_url')
+  assert.equal(fetched, false)
+
+  const pathBase = await invoke(['ls', '--url', 'https://docs.example.com/tenant', '--json'], {
+    cwd: tmpdir(),
+    env: { DOC_API_TOKEN: 'doc_pat_path_base' },
+    fetch: async () => {
+      fetched = true
+    },
+  })
+  assert.equal(pathBase.code, 2)
+  assert.equal(JSON.parse(pathBase.stderr).code, 'invalid_api_url')
+})
+
+test('get encodes document ids, reads ETag, and supports content-only output', async () => {
+  const calls = []
+  const fetchDocument = async (url) => {
+    calls.push(String(url))
+    return apiResponse(
+      {
+        data: {
+          ...documentDto({ id: 'folder/doc' }),
+          content: { type: 'doc', content: [] },
+        },
+      },
+      { headers: { etag: '"doc:revision-1"' } }
+    )
+  }
+  const options = {
+    cwd: tmpdir(),
+    env: { DOC_API_URL: 'https://docs.example.com', DOC_API_TOKEN: 'doc_pat_get' },
+    fetch: fetchDocument,
+  }
+  const jsonResult = await invoke(['get', 'folder/doc', '--json'], options)
+  assert.equal(jsonResult.code, 0)
+  assert.equal(calls[0], 'https://docs.example.com/api/v1/documents/folder%2Fdoc')
+  assert.equal(JSON.parse(jsonResult.stdout).etag, '"doc:revision-1"')
+
+  const contentResult = await invoke(['get', 'folder/doc', '--content-only'], options)
+  assert.deepEqual(JSON.parse(contentResult.stdout), { type: 'doc', content: [] })
+})
+
+test('human-readable document output strips terminal control sequences', async () => {
+  const result = await invoke(['get', 'doc-1'], {
+    cwd: tmpdir(),
+    env: { DOC_API_URL: 'https://docs.example.com', DOC_API_TOKEN: 'doc_pat_terminal' },
+    fetch: async () =>
+      apiResponse(
+        {
+          data: {
+            ...documentDto({
+              title: 'Safe\u001b]52;c;YXR0YWNr\u0007Title',
+              icon: '\u001b[31m📘\u001b[0m',
+            }),
+            content: { type: 'doc', content: [] },
+          },
+        },
+        { headers: { etag: '"safe-etag"' } }
+      ),
+  })
+
+  assert.equal(result.code, 0)
+  assert.equal(/[\u001b\u0007]/.test(result.stdout), false)
+  assert.match(result.stdout, /Safe]52;c;YXR0YWNrTitle/)
+})
+
+test('create validates TipTap input before posting the exact API body', async () => {
+  const inputDirectory = await mkdtemp(join(tmpdir(), 'doc-cli-content-'))
+  const contentPath = join(inputDirectory, 'content.json')
+  await writeFile(contentPath, JSON.stringify({ type: 'doc', content: [{ type: 'paragraph' }] }))
+  const calls = []
+  const result = await invoke(
+    ['create', '--title', 'Agent doc', '--parent', 'parent-1', '--content-file', contentPath, '--json'],
+    {
+      cwd: tmpdir(),
+      env: { DOC_API_URL: 'https://docs.example.com', DOC_API_TOKEN: 'doc_pat_create' },
+      fetch: async (url, options) => {
+        calls.push({ url: String(url), options })
+        return apiResponse(
+          {
+            data: {
+              ...documentDto({
+                id: 'created-1',
+                title: 'Agent doc',
+                parentId: 'parent-1',
+              }),
+              content: { type: 'doc', content: [{ type: 'paragraph' }] },
+            },
+          },
+          { status: 201, headers: { etag: '"created-1"' } }
+        )
+      },
+    }
+  )
+
+  assert.equal(result.code, 0)
+  assert.equal(calls[0].options.method, 'POST')
+  assert.deepEqual(JSON.parse(calls[0].options.body), {
+    title: 'Agent doc',
+    parentId: 'parent-1',
+    content: { type: 'doc', content: [{ type: 'paragraph' }] },
+  })
+
+  const invalid = await invoke(['create', '--title', 'Invalid', '--content-file', '-'], {
+    cwd: tmpdir(),
+    env: { DOC_API_URL: 'https://docs.example.com', DOC_API_TOKEN: 'doc_pat_create' },
+    stdin: Readable.from(['{"type":"paragraph"}']),
+    fetch: async () => {
+      throw new Error('must not fetch')
+    },
+  })
+  assert.equal(invalid.code, 2)
+  assert.match(invalid.stderr, /TipTap document object/)
+
+  const oversizedPath = join(inputDirectory, 'oversized.json')
+  await writeFile(
+    oversizedPath,
+    JSON.stringify({
+      type: 'doc',
+      content: [{ type: 'paragraph', content: [{ type: 'text', text: 'x'.repeat(1_000_000) }] }],
+    })
+  )
+  const oversized = await invoke(['create', '--title', 'Too large', '--content-file', oversizedPath], {
+    cwd: tmpdir(),
+    env: { DOC_API_URL: 'https://docs.example.com', DOC_API_TOKEN: 'doc_pat_create' },
+    fetch: async () => {
+      throw new Error('must not fetch')
+    },
+  })
+  assert.equal(oversized.code, 2)
+  assert.match(oversized.stderr, /exceeds 1000000 bytes/)
+})
+
+test('update validates changes and sends metadata with an ETag precondition', async () => {
+  const calls = []
+  const options = {
+    cwd: tmpdir(),
+    env: { DOC_API_URL: 'https://docs.example.com', DOC_API_TOKEN: 'doc_pat_update' },
+    fetch: async (url, fetchOptions) => {
+      calls.push({ url: String(url), options: fetchOptions })
+      return apiResponse(
+        { data: documentDto({ title: 'Renamed', starred: true }) },
+        { headers: { etag: '"revision-2"' } }
+      )
+    },
+  }
+  const result = await invoke(
+    ['update', 'doc-1', '--title', 'Renamed', '--clear-icon', '--star', '--if-match', '"revision-1"', '--json'],
+    options
+  )
+
+  assert.equal(result.code, 0)
+  assert.equal(calls[0].options.method, 'PATCH')
+  assert.equal(calls[0].options.headers['if-match'], '"revision-1"')
+  assert.deepEqual(JSON.parse(calls[0].options.body), {
+    title: 'Renamed',
+    icon: null,
+    isStar: true,
+  })
+
+  const forced = await invoke(['update', 'doc-1', '--unstar', '--force'], options)
+  assert.equal(forced.code, 0)
+  assert.equal(calls[1].options.headers['if-match'], '*')
+  assert.match(forced.stdout, /etag: "revision-2"/)
+
+  const noChanges = await invoke(['update', 'doc-1', '--force'], options)
+  assert.equal(noChanges.code, 2)
+  const conflicting = await invoke(['update', 'doc-1', '--star', '--unstar'], options)
+  assert.equal(conflicting.code, 2)
+  const noPrecondition = await invoke(['update', 'doc-1', '--star'], options)
+  assert.equal(noPrecondition.code, 2)
+  assert.equal(calls.length, 2)
+})
+
+test('document commands reject incomplete API envelopes and missing ETags', async () => {
+  const baseOptions = {
+    cwd: tmpdir(),
+    env: { DOC_API_URL: 'https://docs.example.com', DOC_API_TOKEN: 'doc_pat_contract' },
+  }
+
+  const badMeta = await invoke(['ls', '--json'], {
+    ...baseOptions,
+    fetch: async () => apiResponse({ data: [documentDto()], meta: 'not-an-object' }),
+  })
+  assert.equal(badMeta.code, 1)
+  assert.equal(JSON.parse(badMeta.stderr).code, 'invalid_api_response')
+
+  const missingContent = await invoke(['get', 'doc-1', '--json'], {
+    ...baseOptions,
+    fetch: async () => apiResponse({ data: documentDto() }, { headers: { etag: '"revision-1"' } }),
+  })
+  assert.equal(missingContent.code, 1)
+  assert.equal(JSON.parse(missingContent.stderr).code, 'invalid_api_response')
+
+  const missingEtag = await invoke(['get', 'doc-1', '--json'], {
+    ...baseOptions,
+    fetch: async () =>
+      apiResponse({
+        data: {
+          ...documentDto(),
+          content: { type: 'doc', content: [] },
+        },
+      }),
+  })
+  assert.equal(missingEtag.code, 1)
+  assert.equal(JSON.parse(missingEtag.stderr).code, 'invalid_api_response')
+})
+
+test('API errors, malformed responses, size limits, and timeouts are stable and redact tokens', async () => {
+  const token = 'doc_pat_never_print_this'
+  const baseOptions = {
+    cwd: tmpdir(),
+    env: { DOC_API_URL: 'https://docs.example.com', DOC_API_TOKEN: token },
+  }
+  const unauthorized = await invoke(['ls', '--json'], {
+    ...baseOptions,
+    fetch: async () =>
+      apiResponse(
+        {
+          error: { code: 'invalid_token', message: `Invalid token ${token}` },
+          requestId: 'request-1',
+        },
+        { status: 401 }
+      ),
+  })
+  assert.equal(unauthorized.code, 1)
+  assert.deepEqual(JSON.parse(unauthorized.stderr), {
+    error: 'Invalid token [redacted]',
+    code: 'invalid_token',
+    status: 401,
+    requestId: 'request-1',
+    exitCode: 1,
+  })
+  assert.equal(unauthorized.stderr.includes(token), false)
+
+  const malformed = await invoke(['ls', '--json'], {
+    ...baseOptions,
+    fetch: async () => new Response('not json', { status: 200 }),
+  })
+  assert.equal(malformed.code, 1)
+  assert.equal(JSON.parse(malformed.stderr).code, 'invalid_api_response')
+
+  const oversized = await invoke(['ls', '--json'], {
+    ...baseOptions,
+    apiMaxResponseBytes: 8,
+    fetch: async () => apiResponse({ data: [] }),
+  })
+  assert.equal(oversized.code, 1)
+  assert.equal(JSON.parse(oversized.stderr).code, 'response_too_large')
+
+  const timedOut = await invoke(['ls', '--json'], {
+    ...baseOptions,
+    apiTimeoutMs: 5,
+    fetch: async (_url, options) =>
+      new Promise((_resolve, reject) => {
+        options.signal.addEventListener('abort', () => {
+          const error = new Error('aborted')
+          error.name = 'AbortError'
+          reject(error)
+        })
+      }),
+  })
+  assert.equal(timedOut.code, 1)
+  assert.equal(JSON.parse(timedOut.stderr).code, 'api_timeout')
 })

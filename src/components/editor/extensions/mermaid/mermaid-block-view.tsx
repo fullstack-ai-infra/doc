@@ -6,13 +6,14 @@ import { Code2, Columns2, Eye } from 'lucide-react'
 import { NodeViewWrapper, type ReactNodeViewProps } from '@tiptap/react'
 import { useTranslations } from 'next-intl'
 import { useCallback, useState } from 'react'
+import { MAX_MERMAID_CODE_CHARACTERS, safeMermaidCode } from '@/lib/tiptap-attribute-safety'
 
 type ViewMode = 'split' | 'edit' | 'preview'
 
 export default function MermaidBlockView(props: ReactNodeViewProps) {
   const { editor, getPos, node, updateAttributes, selected } = props
   const t = useTranslations('editor')
-  const code = (node.attrs.code as string) || ''
+  const code = safeMermaidCode(node.attrs.code)
   const [viewMode, setViewMode] = useState<ViewMode>('split')
 
   const onClick = useCallback(() => {
@@ -28,9 +29,10 @@ export default function MermaidBlockView(props: ReactNodeViewProps) {
     <textarea
       className="h-full min-h-72 w-full resize-none rounded border bg-muted/40 p-3 font-mono text-xs leading-relaxed outline-none focus:border-blue-500"
       value={code}
+      maxLength={MAX_MERMAID_CODE_CHARACTERS}
       spellCheck={false}
       onClick={(event) => event.stopPropagation()}
-      onChange={(event) => updateAttributes({ code: event.target.value })}
+      onChange={(event) => updateAttributes({ code: safeMermaidCode(event.target.value) })}
     />
   )
 

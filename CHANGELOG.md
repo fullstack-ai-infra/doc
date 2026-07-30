@@ -15,6 +15,10 @@ All notable changes to `doc` are documented here.
   lifecycle, status, logs, development, and guarded local database commands.
 - Database-aware Web and collaboration health endpoints.
 - Full Docker Compose stack for PostgreSQL, schema application, collaboration, and Web.
+- Bearer-only `/api/v1` document endpoints for token inspection, listing, reading, canonical
+  creation, and ETag-guarded metadata updates.
+- Remote `doc auth`, `doc ls`, `doc get`, `doc create`, and `doc update` commands with private
+  credential storage, bounded requests, machine-readable output, and no checkout requirement.
 
 ### Changed
 
@@ -24,3 +28,13 @@ All notable changes to `doc` are documented here.
   authentication, mail, Next.js 14, collaboration, storage, and Markdown dependency lines.
 - Bound local Compose ports to loopback, removed fallback collaboration keys, isolated Compose
   projects per checkout, and made the collaboration image install from the root lockfile.
+- Hardened legacy document reads, duplication, sharing, publishing, and collaboration monitoring
+  against cross-user access and soft-deleted document access.
+- Added scoped, expiring, and revocable personal access tokens with a session-protected bilingual
+  management interface that reveals new token values only once.
+- Sanitized new and existing published document HTML through a server-side allowlist before public
+  rendering.
+- Restricted collaboration-rendered TipTap attributes to safe values and stopped locale redirects
+  from trusting forwarded origin headers.
+- Bounded token, sharing, and publishing mutation bodies, kept internal-key checks constant-time,
+  and stopped publication storage errors from reaching clients.

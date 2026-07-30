@@ -3,31 +3,56 @@ import { getUserInfo } from '@/lib/session'
 import { db } from '@/db/db'
 import { genSuccessData, genErrorData, genUnAuthData } from '@/app/api/utils/gen-res-data'
 import { sendEmail } from '@/lib/mailer'
+import { DOCUMENT_ACCESS, resolveDocumentAccess } from '@/lib/document-access'
 
 const updateDocSchema = z
   .object({
     title: z.string().optional(),
     icon: z.string().nullable().optional(),
-    content: z.string().optional(),
     isStar: z.boolean().optional(),
   })
   .strict()
 
 // 获取单个 doc 内容
 export async function GET(request: Request, { params }: { params: { id: string } }) {
-  // const user = await getUserInfo()
-  // if (user == null) return Response.json(genUnAuthData())
+  const user = await getUserInfo()
+  if (user == null) return Response.json(genUnAuthData())
 
   const { id } = params
 
   try {
-    const doc = await db.doc.findUnique({
-      where: { id, isDeleted: false }, // 不能加 userId 条件，否则分享文档会获取失败
+    const doc = await db.doc.findFirst({
+      where: {
+        id,
+        isDeleted: false,
+        OR: [
+          { userId: user.id || '' },
+          {
+            shareRelations: {
+              some: { userId: user.id || '' },
+            },
+          },
+        ],
+      },
+      select: {
+        userId: true,
+        content: true,
+        contentBinary: true,
+        shareRelations: {
+          where: { userId: user.id || '' },
+          select: { access: true, authorId: true },
+        },
+      },
     })
-    if (doc == null) {
+    if (doc == null || resolveDocumentAccess(doc, user.id || '') === DOCUMENT_ACCESS.NONE) {
       return Response.json(genErrorData('Doc not found'))
     }
-    return Response.json(genSuccessData(doc))
+    return Response.json(
+      genSuccessData({
+        content: doc.content,
+        contentBinary: doc.contentBinary,
+      })
+    )
   } catch (ex: any) {
     console.error('Get doc error', ex)
     sendEmail({ subject: 'Get doc error', text: ex.message || 'error' })

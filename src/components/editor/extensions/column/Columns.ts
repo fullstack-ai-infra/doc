@@ -1,4 +1,5 @@
 import { Node } from '@tiptap/core'
+import { safeColumnBorder, safeColumnLayout } from '@/lib/tiptap-attribute-safety'
 
 export enum ColumnLayout {
   SidebarLeft = 'sidebar-left',
@@ -37,9 +38,19 @@ export const Columns = Node.create({
     return {
       layout: {
         default: ColumnLayout.TwoColumn,
+        parseHTML: (element) =>
+          safeColumnLayout(element.getAttribute('data-layout') || element.getAttribute('layout')) ||
+          ColumnLayout.TwoColumn,
+        renderHTML: (attributes) => ({
+          'data-layout': safeColumnLayout(attributes.layout) || ColumnLayout.TwoColumn,
+        }),
       },
       withBorder: {
         default: true,
+        parseHTML: (element) => (element.getAttribute('data-with-border') === 'false' ? false : true),
+        renderHTML: (attributes) => ({
+          'data-with-border': String(safeColumnBorder(attributes.withBorder)),
+        }),
       },
     }
   },
@@ -68,10 +79,17 @@ export const Columns = Node.create({
     }
   },
 
-  renderHTML({ HTMLAttributes }) {
+  renderHTML({ node }) {
+    const layout = safeColumnLayout(node.attrs.layout) || ColumnLayout.TwoColumn
+    const withBorder = safeColumnBorder(node.attrs.withBorder)
     return [
       'div',
-      { 'data-type': 'columns', class: `layout-${HTMLAttributes.layout} with-border-${HTMLAttributes.withBorder}` },
+      {
+        'data-type': 'columns',
+        'data-layout': layout,
+        'data-with-border': String(withBorder),
+        class: `layout-${layout} with-border-${withBorder}`,
+      },
       0,
     ]
   },

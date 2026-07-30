@@ -10,7 +10,9 @@ This document describes the current implementation, not an aspirational API.
 - NextAuth with GitHub and email providers
 - Prisma against PostgreSQL
 - Tiptap editor with Yjs collaboration
-- REST-style route handlers under `src/app/api`
+- Scoped, expiring, revocable personal access tokens
+- Bearer-only document API v1 under `src/app/api/v1`
+- Browser-session route handlers under `src/app/api`
 
 ### Collaboration service
 
@@ -18,11 +20,13 @@ This document describes the current implementation, not an aspirational API.
 - Hocuspocus and Yjs document rooms
 - Shared PostgreSQL document state
 - Encrypted short-lived user tokens for WebSocket authentication
-- Separate internal key for restore operations
+- Separate internal key for restore and monitor operations
 
 ### Operations CLI
 
 - Independent `@fullstack-ai-infra/doc-cli` workspace with the `doc` binary
+- Private PAT login plus token validation through `/api/v1/me`
+- Document list, get, canonical create, and ETag-guarded metadata update from any directory
 - Project discovery with explicit `--root` override
 - Private environment initialization with independent generated secrets
 - Docker/Compose/configuration diagnostics with JSON output
@@ -32,23 +36,25 @@ This document describes the current implementation, not an aspirational API.
 
 ## Core records
 
-| Record          | Role                                                                |
-| --------------- | ------------------------------------------------------------------- |
-| `Doc`           | Document tree node, current JSON/binary content and lifecycle flags |
-| `DocVersion`    | Immutable document snapshot used for history and restore            |
-| `ShareRelation` | User-level read/write access to a document                          |
-| `PubDoc`        | Public projection with moderation state                             |
-| `TokenUsage`    | Per-user AI usage limit                                             |
+| Record                | Role                                                                |
+| --------------------- | ------------------------------------------------------------------- |
+| `Doc`                 | Document tree node, current JSON/binary content and lifecycle flags |
+| `DocVersion`          | Immutable document snapshot used for history and restore            |
+| `ShareRelation`       | User-level read/write access to a document                          |
+| `PubDoc`              | Sanitized public projection with moderation state                   |
+| `PersonalAccessToken` | Hashed, scoped, expiring, revocable API credential                  |
+| `TokenUsage`          | Per-user AI usage limit                                             |
 
 The Prisma schema is the source of truth for field-level definitions.
 
 ## Trust boundaries
 
 1. Browser sessions authenticate through NextAuth.
-2. WebSocket connections use a short-lived encrypted token carrying `userId`.
-3. The collaboration service rechecks document access in PostgreSQL.
-4. Internal restore calls require `COLLABORATE_INTERNAL_API_KEY`.
-5. AI provider and object-storage credentials remain server-side.
+2. API v1 accepts only scoped Bearer PATs and never falls back to a browser session.
+3. WebSocket connections use a short-lived encrypted token carrying `userId`.
+4. The collaboration service rechecks document access in PostgreSQL.
+5. Internal restore and monitor calls require `COLLABORATE_INTERNAL_API_KEY`.
+6. AI provider and object-storage credentials remain server-side.
 
 ## Version restore
 
@@ -64,8 +70,9 @@ success.
 ## Known gaps
 
 - The collaboration service needs deeper automated integration tests.
-- API routes do not yet form a versioned public Agent contract.
+- API v1 does not yet replace existing content, delete/restore, manage versions, or publish.
 - Object storage is coupled to an OSS client and needs a provider interface.
-- CLI document CRUD and import/export require scoped PATs and a stable `/api/v1`.
+- CLI version restore, publish, and workspace import/export remain deferred.
 - Production deployments need reviewed Prisma migrations instead of `db push`.
+- Current production dependencies still have unresolved high-severity audit findings.
 - Rate limits and audit events are incomplete.

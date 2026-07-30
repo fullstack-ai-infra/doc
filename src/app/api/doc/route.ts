@@ -26,7 +26,7 @@ export async function POST(request: Request) {
       isDeleted: false,
     },
   })
-  if (docCount > MAX_DOC_COUNT) {
+  if (docCount >= MAX_DOC_COUNT) {
     return Response.json(genErrorData(`You only can create up to ${MAX_DOC_COUNT} docs`))
   }
 
@@ -36,8 +36,12 @@ export async function POST(request: Request) {
 
   // 从 originId 复制一个
   if (originId) {
-    const originDoc = await db.doc.findUnique({
-      where: { id: originId },
+    const originDoc = await db.doc.findFirst({
+      where: {
+        id: originId,
+        userId: user.id,
+        isDeleted: false,
+      },
     })
     if (originDoc == null) {
       return Response.json(genErrorData('Origin doc not found'))
@@ -47,6 +51,20 @@ export async function POST(request: Request) {
     content = originDoc.content
     contentBinary = originDoc.contentBinary
     parentId = originDoc.parentId
+  }
+
+  if (parentId) {
+    const parent = await db.doc.findFirst({
+      where: {
+        id: parentId,
+        userId: user.id,
+        isDeleted: false,
+      },
+      select: { id: true },
+    })
+    if (parent == null) {
+      return Response.json(genErrorData('Parent doc not found'))
+    }
   }
 
   // 创建 doc：按复制/新建后的父级重新计算同级末尾 sortOrder

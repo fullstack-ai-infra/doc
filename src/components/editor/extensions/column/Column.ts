@@ -1,4 +1,5 @@
 import { Node, mergeAttributes } from '@tiptap/core'
+import { safeColumnPosition } from '@/lib/tiptap-attribute-safety'
 
 export const Column = Node.create({
   name: 'column',
@@ -12,15 +13,19 @@ export const Column = Node.create({
     return {
       position: {
         default: '',
-        parseHTML: (element) => element.getAttribute('data-position'), // 'left' | 'right' ，Columns.ts 中有写
-        renderHTML: (attributes) => ({ 'data-position': attributes.position }),
+        parseHTML: (element) => safeColumnPosition(element.getAttribute('data-position')) || '',
+        renderHTML: (attributes) => {
+          const position = safeColumnPosition(attributes.position)
+          return position ? { 'data-position': position } : {}
+        },
       },
     }
   },
 
   // 定义如何输出 HTML
   renderHTML({ HTMLAttributes }) {
-    return ['div', mergeAttributes(HTMLAttributes, { 'data-type': 'column' }), 0]
+    const position = safeColumnPosition(HTMLAttributes['data-position'])
+    return ['div', mergeAttributes(position ? { 'data-position': position } : {}, { 'data-type': 'column' }), 0]
   },
 
   // 定义如何解析传入的 HTML

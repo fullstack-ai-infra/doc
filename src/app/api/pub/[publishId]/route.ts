@@ -1,7 +1,21 @@
+import { z } from 'zod'
 import { db } from '@/db/db'
 import { getUserInfo } from '@/lib/session'
 import { genSuccessData, genUnAuthData, genErrorData } from '@/app/api/utils/gen-res-data'
 import { PUB_DOC_STATUS } from '@/lib/pub-doc-status'
+import { DOCUMENT_ACCESS, getDocumentAccess } from '@/lib/document-access'
+import { MAX_PUBLISHED_HTML_BYTES, sanitizePublishedHtml } from '@/lib/sanitize-published-html'
+import { readJsonBody } from '@/lib/read-json-body'
+
+const updatePublicationSchema = z
+  .object({
+    docId: z.string().min(1).max(128),
+    title: z.string().max(500),
+    htmlContent: z.string(),
+  })
+  .strict()
+
+const MAX_PUBLICATION_REQUEST_BYTES = MAX_PUBLISHED_HTML_BYTES * 2 + 64 * 1024
 
 export async function GET(request: Request, { params }: { params: { publishId: string } }) {
   const user = await getUserInfo()
@@ -43,8 +57,13 @@ export async function PATCH(request: Request, { params }: { params: { publishId:
   if (user == null) return Response.json(genUnAuthData())
 
   const { publishId } = params // `publishId` is publish url suffix
-  const body = await request.json()
-  const { docId, title, htmlContent } = body
+  const parsed = updatePublicationSchema.safeParse(
+    await readJsonBody(request, MAX_PUBLICATION_REQUEST_BYTES).catch(() => null)
+  )
+  if (!parsed.success) {
+    return Response.json(genErrorData('Publish payload invalid'))
+  }
+  const { docId, title, htmlContent } = parsed.data
   try {
     const current = await db.pubDoc.findUnique({
       where: {
@@ -69,13 +88,19 @@ export async function PATCH(request: Request, { params }: { params: { publishId:
       return Response.json(genErrorData('该发布内容已被冻结，请联系管理员处理'))
     }
 
+    const documentAccess = await getDocumentAccess(docId, user.id || '')
+    if (documentAccess !== DOCUMENT_ACCESS.OWNER) {
+      return Response.json(genErrorData('Doc not found'))
+    }
+    const safeHtmlContent = sanitizePublishedHtml(htmlContent)
+
     const p = await db.pubDoc.update({
       where: {
         publishId,
       },
       data: {
         title,
-        htmlContent,
+        htmlContent: safeHtmlContent,
         docId,
         status: PUB_DOC_STATUS.PUBLISHED,
         statusReason: null,
@@ -84,8 +109,9 @@ export async function PATCH(request: Request, { params }: { params: { publishId:
       },
     })
     return Response.json(genSuccessData(p))
-  } catch (ex: any) {
-    return Response.json(genErrorData(ex.message))
+  } catch (error) {
+    console.error('Update publication error', error)
+    return Response.json(genErrorData('Unable to update publication'))
   }
 }
 
@@ -125,7 +151,8 @@ export async function DELETE(request: Request, { params }: { params: { publishId
       },
     })
     return Response.json(genSuccessData(p))
-  } catch (ex: any) {
-    return Response.json(genErrorData(ex.message))
+  } catch (error) {
+    console.error('Unpublish document error', error)
+    return Response.json(genErrorData('Unable to unpublish document'))
   }
 }

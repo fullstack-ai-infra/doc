@@ -2,6 +2,7 @@ import { cn } from '@/lib/utils'
 import { NodeViewWrapper, type ReactNodeViewProps } from '@tiptap/react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { CONTENT_WIDTH } from '@/constants'
+import { safeImageAlignment, safeImageRatio, safeImageSource, safeImageWidth } from '@/lib/tiptap-attribute-safety'
 
 interface ImageBlockAttrs {
   src: string
@@ -15,17 +16,24 @@ export const ImageBlockView = (props: ReactNodeViewProps) => {
   const attrs = node.attrs as ImageBlockAttrs
   const { src } = attrs
   const imgContainerRef = useRef<HTMLDivElement>(null)
+  const safeSrc = safeImageSource(src)
+  const safeWidth = safeImageWidth(attrs.width) || '100%'
+  const safeRatio = safeImageRatio(attrs.ratio)
+  const safeAlign = safeImageAlignment(attrs.align) || 'center'
 
   // 增加 ali-oss 图片裁剪参数
-  const srcUrlObj = new URL(src)
-  srcUrlObj.searchParams.set('x-oss-process', `image/resize,w_${CONTENT_WIDTH * 2},m_lfit`) // 如 w_800 表示宽度 800px，m_lfit 表示等比缩放
-  const resizedSrc = srcUrlObj.href
+  let resizedSrc: string | null = null
+  if (safeSrc) {
+    const srcUrlObj = new URL(safeSrc)
+    srcUrlObj.searchParams.set('x-oss-process', `image/resize,w_${CONTENT_WIDTH * 2},m_lfit`) // 如 w_800 表示宽度 800px，m_lfit 表示等比缩放
+    resizedSrc = srcUrlObj.href
+  }
 
   // 对齐方式
   const wrapperClassName = cn(
-    attrs.align === 'left' ? 'ml-0' : 'ml-auto',
-    attrs.align === 'right' ? 'mr-0' : 'mr-auto',
-    attrs.align === 'center' && 'mx-auto',
+    safeAlign === 'left' ? 'ml-0' : 'ml-auto',
+    safeAlign === 'right' ? 'mr-0' : 'mr-auto',
+    safeAlign === 'center' && 'mx-auto',
     'bg-muted'
   )
 
@@ -34,33 +42,37 @@ export const ImageBlockView = (props: ReactNodeViewProps) => {
   }, [getPos, editor.commands])
 
   const onDoubleClick = useCallback(() => {
-    window.open(src, '_blank')
-  }, [src])
+    if (safeSrc) window.open(safeSrc, '_blank', 'noopener,noreferrer')
+  }, [safeSrc])
 
   const [height, setHeight] = useState('auto')
   useEffect(() => {
-    if (isNaN(attrs.ratio)) return
-    if (!attrs.ratio) return
+    if (safeRatio == null) {
+      setHeight('auto')
+      return
+    }
     let w = imgContainerRef.current!.clientWidth
     if (!w) {
-      w = CONTENT_WIDTH * (parseInt(attrs.width) / 100) // 如 attrs.width 是 50%
+      w = CONTENT_WIDTH * (parseFloat(safeWidth) / 100) // 如 attrs.width 是 50%
     }
-    setHeight(`${w / attrs.ratio}px`) // 根据宽高比例计算高度
-  }, [setHeight, attrs.width, attrs.ratio])
+    setHeight(`${w / safeRatio}px`) // 根据宽高比例计算高度
+  }, [setHeight, safeWidth, safeRatio])
 
   return (
     <NodeViewWrapper>
-      <div ref={imgContainerRef} className={wrapperClassName} style={{ width: attrs.width, height }}>
-        {/* eslint-disable-next-line  */}
-        <img
-          className="block"
-          src={resizedSrc}
-          alt=""
-          onClick={onClick}
-          onDoubleClick={onDoubleClick}
-          style={{ height: '100%' }}
-          loading="lazy"
-        />
+      <div ref={imgContainerRef} className={wrapperClassName} style={{ width: safeWidth, height }}>
+        {resizedSrc && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            className="block"
+            src={resizedSrc}
+            alt=""
+            onClick={onClick}
+            onDoubleClick={onDoubleClick}
+            style={{ height: '100%' }}
+            loading="lazy"
+          />
+        )}
       </div>
     </NodeViewWrapper>
   )

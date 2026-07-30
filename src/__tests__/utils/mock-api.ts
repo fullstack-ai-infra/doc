@@ -4,6 +4,7 @@ import { http, HttpResponse } from 'msw'
 import { TEST_DOC, TEST_DOC_ID, TEST_DOC2, TEST_USER2_NAME } from '../utils/constants'
 
 export default function mockAPI() {
+  let personalAccessTokens: Array<Record<string, unknown>> = []
   const restHandlers = [
     // doc APIs
     http.get(`/api/doc/${TEST_DOC_ID}`, () => {
@@ -47,6 +48,43 @@ export default function mockAPI() {
           },
         },
       })
+    }),
+    // personal access token APIs
+    http.get('/api/personal-access-tokens', () => {
+      return HttpResponse.json({ data: personalAccessTokens })
+    }),
+    http.post('/api/personal-access-tokens', async ({ request }) => {
+      const body = (await request.json()) as {
+        name: string
+        scopes: string[]
+        expiresInDays: number
+      }
+      const safeToken = {
+        id: 'pat-test-1',
+        name: body.name,
+        tokenPrefix: 'doc_pat_aaaaaaaa',
+        scopes: body.scopes,
+        expiresAt: new Date(Date.now() + body.expiresInDays * 24 * 60 * 60 * 1000).toISOString(),
+        lastUsedAt: null,
+        revokedAt: null,
+        createdAt: new Date().toISOString(),
+      }
+      personalAccessTokens = [safeToken, ...personalAccessTokens]
+      return HttpResponse.json(
+        {
+          data: {
+            ...safeToken,
+            token: `doc_pat_${'a'.repeat(43)}`,
+          },
+        },
+        { status: 201 }
+      )
+    }),
+    http.delete('/api/personal-access-tokens/:id', ({ params }) => {
+      personalAccessTokens = personalAccessTokens.map((token) =>
+        token.id === params.id ? { ...token, revokedAt: new Date().toISOString() } : token
+      )
+      return new HttpResponse(null, { status: 204 })
     }),
   ]
 

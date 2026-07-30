@@ -26,7 +26,7 @@
 | ------------------------- | ------------------------------------------ |
 | `src/`                    | Next.js 产品界面、HTTP API、认证与文档能力 |
 | `services/collaboration/` | Hocuspocus/Yjs 实时协作服务                |
-| `packages/cli/`           | `doc` 本地初始化、诊断与服务编排 CLI       |
+| `packages/cli/`           | `doc` 远程文档与本地运维 CLI               |
 | `prisma/`                 | PostgreSQL 文档、权限、发布和版本数据模型  |
 | `docker-compose.yml`      | PostgreSQL、迁移、协作与 Web 完整服务栈    |
 | `docs/`                   | 开发、运行与架构说明                       |
@@ -40,7 +40,8 @@
 - 文档版本快照、差异查看和恢复
 - AI 续写、总结、大纲、翻译、改写和文档侧边对话
 - 中英文界面、暗色/亮色主题和 GitHub/邮箱认证
-- `doc` CLI：环境初始化、诊断、完整服务栈启停、状态、日志和本地数据库任务
+- scoped PAT 与 `/api/v1`：文档列表、读取、新建和 ETag 保护的元数据更新
+- `doc` CLI：远程文档命令，以及本地初始化、诊断、服务栈启停、状态、日志和数据库任务
 
 完整的已交付、实验性与暂缺能力见 [docs/CAPABILITIES.md](docs/CAPABILITIES.md)。
 
@@ -85,8 +86,9 @@ doc up --build
 doc doctor --live
 ```
 
-打开 <http://localhost:3000>。CLI 契约见 [docs/CLI.md](docs/CLI.md)，完整配置和分服务
-启动方式见 [docs/RUN_LOCAL.md](docs/RUN_LOCAL.md)。
+打开 <http://localhost:3000>。登录后可在用户设置创建 scoped PAT，再通过 `doc auth login`
+连接。CLI 契约见 [docs/CLI.md](docs/CLI.md)，API 契约见 [docs/API.md](docs/API.md)，完整配置
+和分服务启动方式见 [docs/RUN_LOCAL.md](docs/RUN_LOCAL.md)。
 
 ## 开发
 
@@ -105,9 +107,9 @@ npm run check                # format, lint, tests, service syntax and build
 
 当前定位是可开发、可自托管的产品基础，而不是稳定发布版。接下来的重点是：
 
-1. 把文档 API 收敛为可供 Agent 使用的稳定契约，并增加 scoped PAT。
-2. 增加可重复的协作、版本恢复与权限回归测试。
+1. 增加 active-room-aware 的正文 mutation gateway，并扩展版本、发布和 bundle API。
+2. 增加可重复的多客户端协作、主动撤权和版本恢复回归测试。
 3. 完善对象存储抽象和生产 migration 工作流。
-4. 在稳定 API 上增加文档 CRUD、版本、发布和 workspace bundle CLI。
+4. 补齐审计事件、速率限制、指标和结构化日志。
 
 安全问题请按 [SECURITY.md](SECURITY.md) 私下报告。

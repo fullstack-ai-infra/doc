@@ -61,9 +61,6 @@ export const TableCell = Node.create<TableCellOptions>({
           return value
         },
       },
-      style: {
-        default: null,
-      },
     }
   },
 
