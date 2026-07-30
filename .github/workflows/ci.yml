@@ -34,4 +34,5 @@ jobs:
       - run: npm run lint
       - run: npm run test-ci
       - run: npm run build:collaboration
+      - run: npm run check:cli
       - run: npm run build

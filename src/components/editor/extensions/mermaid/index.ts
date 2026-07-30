@@ -1,5 +1,6 @@
 import { Node, mergeAttributes } from '@tiptap/core'
 import { ReactNodeViewRenderer } from '@tiptap/react'
+import { safeMermaidCode } from '@/lib/tiptap-attribute-safety'
 import MermaidBlockView from './mermaid-block-view'
 
 export const DEFAULT_MERMAID_CODE = `graph TD
@@ -31,9 +32,9 @@ const MermaidBlock = Node.create({
     return {
       code: {
         default: DEFAULT_MERMAID_CODE,
-        parseHTML: (element) => element.getAttribute('data-code') || DEFAULT_MERMAID_CODE,
+        parseHTML: (element) => safeMermaidCode(element.getAttribute('data-code')) || DEFAULT_MERMAID_CODE,
         renderHTML: (attributes) => ({
-          'data-code': attributes.code,
+          'data-code': safeMermaidCode(attributes.code),
         }),
       },
     }
@@ -47,8 +48,14 @@ const MermaidBlock = Node.create({
     ]
   },
 
-  renderHTML({ HTMLAttributes }) {
-    return ['div', mergeAttributes(HTMLAttributes, { 'data-type': 'mermaid-block' })]
+  renderHTML({ node }) {
+    return [
+      'div',
+      mergeAttributes({
+        'data-code': safeMermaidCode(node.attrs.code),
+        'data-type': 'mermaid-block',
+      }),
+    ]
   },
 
   addCommands() {

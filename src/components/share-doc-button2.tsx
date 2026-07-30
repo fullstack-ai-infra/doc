@@ -47,7 +47,7 @@ export default function ShareDocButton(props: IProps) {
 
     setRemoveTransition(async () => {
       const url = '/api/doc/share-relation'
-      const res = await del(url, { id, docTitle: r.doc.title, email: r.user?.email })
+      const res = await del(url, { id })
       if (res.errno !== 0) return alert(res.msg)
       removeMyShareRelation(id)
     })
@@ -67,7 +67,7 @@ export default function ShareDocButton(props: IProps) {
     if (shareRelations.length >= MAX_SHARE_COUNT) return alert(t('maxShare', { maxNum: MAX_SHARE_COUNT }))
 
     const url = '/api/doc/share-relation'
-    const res = await post(url, { email, access, docId: id, docTitle: curDoc?.title })
+    const res = await post(url, { email, access, docId: id })
     if (res.errno !== 0) return alert(res.msg)
 
     const { shareRelation, userName } = res.data

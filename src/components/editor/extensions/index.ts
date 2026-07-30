@@ -1,13 +1,10 @@
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
 import Underline from '@tiptap/extension-underline'
-import TextAlign from '@tiptap/extension-text-align'
 import SubScript from '@tiptap/extension-subscript'
 import Superscript from '@tiptap/extension-superscript'
-import Highlight from '@tiptap/extension-highlight'
 import { TaskItem } from '@tiptap/extension-task-item'
 import { TaskList } from '@tiptap/extension-task-list'
-import Link from '@tiptap/extension-link'
 import SearchAndReplace from '@sereneinserenade/tiptap-search-and-replace'
 import { FileHandler } from '@tiptap/extension-file-handler'
 import { Dropcursor } from '@tiptap/extension-dropcursor'
@@ -25,6 +22,9 @@ import AddParagraph from './paragraph'
 import { CodeBlockTabIndent } from './code-block-tab-indent'
 import { EDITOR_CHARACTER_LIMIT } from '@/constants'
 import MermaidBlock from './mermaid'
+import SafeHighlight from './safe-highlight'
+import SafeLink from './safe-link'
+import SafeTextAlign from './safe-text-align'
 
 interface IOptions {
   placeholder: string
@@ -45,17 +45,17 @@ export const getExtensions = (opt: IOptions) => {
       history: false, // disable default history, use collaborate edit
     }),
     Underline,
-    TextAlign.configure({
+    SafeTextAlign.configure({
       types: ['heading', 'paragraph'],
     }),
     SubScript,
     Superscript,
-    Highlight.configure({ multicolor: true }),
+    SafeHighlight.configure({ multicolor: true }),
     TaskList,
     TaskItem.configure({
       nested: true,
     }),
-    Link.configure({
+    SafeLink.configure({
       openOnClick: false,
     }),
     ImageBlock,

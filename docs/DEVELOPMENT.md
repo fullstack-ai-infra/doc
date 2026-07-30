@@ -29,8 +29,11 @@ npm run check
 ## Data and migrations
 
 Change `prisma/schema.prisma` intentionally and document any compatibility impact. Use
-`npm run db:push` for local development only; production releases should move to reviewed Prisma
-migrations before the first stable release.
+`npm run db:push` for local development only. The command runs an idempotent compatibility
+preflight before Prisma applies the schema, including deterministic cleanup of legacy duplicate
+document grants before their unique index is enforced. Do not invoke naked `prisma db push` because
+that bypasses these data guards. Production releases should move to reviewed Prisma migrations
+before the first stable release.
 
 ## Security-sensitive areas
 

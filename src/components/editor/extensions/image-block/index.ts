@@ -1,6 +1,7 @@
 import { ReactNodeViewRenderer } from '@tiptap/react'
 import { mergeAttributes, Range } from '@tiptap/core'
 import { Image as BaseImage } from '@tiptap/extension-image'
+import { safeImageAlignment, safeImageRatio, safeImageSource, safeImageWidth } from '@/lib/tiptap-attribute-safety'
 import ImageBlockView from './image-block-view'
 
 declare module '@tiptap/core' {
@@ -43,33 +44,34 @@ const ImageBlock = BaseImage.extend({
     return {
       src: {
         default: '',
-        parseHTML: (element) => element.getAttribute('src'), // 从 HTML 中解析出属性
-        renderHTML: (attributes) => ({
-          // 把属性渲染到 HTML 中
-          src: attributes.src,
-        }),
+        parseHTML: (element) => safeImageSource(element.getAttribute('src')) || '',
+        renderHTML: (attributes) => {
+          const src = safeImageSource(attributes.src)
+          return src ? { src } : {}
+        },
       },
       width: {
         default: '100%',
-        parseHTML: (element) => element.getAttribute('data-width'),
+        parseHTML: (element) => safeImageWidth(element.getAttribute('data-width')) || '100%',
         renderHTML: (attributes) => ({
-          'data-width': attributes.width,
+          'data-width': safeImageWidth(attributes.width) || '100%',
         }),
       },
       // 宽高比例
       ratio: {
         default: NaN,
-        parseHTML: (element) => element.getAttribute('data-ratio'),
-        renderHTML: (attributes) => ({
-          'data-ratio': attributes.ratio,
-        }),
+        parseHTML: (element) => safeImageRatio(element.getAttribute('data-ratio')) ?? NaN,
+        renderHTML: (attributes) => {
+          const ratio = safeImageRatio(attributes.ratio)
+          return ratio == null ? {} : { 'data-ratio': ratio }
+        },
       },
       // 对齐方式
       align: {
         default: 'center',
-        parseHTML: (element) => element.getAttribute('data-align'),
+        parseHTML: (element) => safeImageAlignment(element.getAttribute('data-align')) || 'center',
         renderHTML: (attributes) => ({
-          'data-align': attributes.align,
+          'data-align': safeImageAlignment(attributes.align) || 'center',
         }),
       },
       alt: {
@@ -83,13 +85,30 @@ const ImageBlock = BaseImage.extend({
   },
 
   renderHTML({ HTMLAttributes }) {
+    const src = safeImageSource(HTMLAttributes.src)
+    const width = safeImageWidth(HTMLAttributes['data-width']) || '100%'
+    const ratio = safeImageRatio(HTMLAttributes['data-ratio'])
+    const align = safeImageAlignment(HTMLAttributes['data-align']) || 'center'
+    const alt = typeof HTMLAttributes.alt === 'string' ? HTMLAttributes.alt.slice(0, 1000) : undefined
+
     return [
       'div',
       {},
       [
         'div',
-        { style: `width: ${HTMLAttributes['data-width']}; margin: ${genMargin(HTMLAttributes['data-align'])};` },
-        ['img', mergeAttributes(this.options.HTMLAttributes, HTMLAttributes)],
+        {
+          style: `width: ${width}; margin: ${genMargin(align)};`,
+        },
+        [
+          'img',
+          mergeAttributes(this.options.HTMLAttributes, {
+            ...(src ? { src } : {}),
+            'data-width': width,
+            ...(ratio == null ? {} : { 'data-ratio': ratio }),
+            'data-align': align,
+            ...(alt === undefined ? {} : { alt }),
+          }),
+        ],
       ],
     ]
   },

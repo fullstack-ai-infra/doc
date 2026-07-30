@@ -6,6 +6,31 @@ import { genSuccessData, genErrorData, genUnAuthData } from '@/app/api/utils/gen
 import { MAX_DOC_COUNT } from '@/constants'
 import { sendEmail } from '@/lib/mailer'
 import { getNextSortOrderForParent } from '@/lib/doc-sort-order'
+import { JsonBodyError, readJsonBody } from '@/lib/read-json-body'
+import { ApiV1Error } from '@/lib/api-v1'
+import { EMPTY_TIPTAP_DOCUMENT, encodeTiptapDocument } from '@/lib/tiptap-codec'
+
+const MAX_CREATE_REQUEST_BYTES = 1024 * 1024
+
+const documentIdSchema = z
+  .string()
+  .min(1)
+  .max(191)
+  .refine((value) => !/[\u0000-\u001f\u007f]/.test(value))
+
+const createDocSchema = z
+  .object({
+    originId: documentIdSchema.optional(),
+    id: documentIdSchema.optional(),
+    title: z
+      .string()
+      .max(100)
+      .refine((value) => !/[\u0000-\u001f\u007f]/.test(value))
+      .optional(),
+    content: z.union([z.string().max(MAX_CREATE_REQUEST_BYTES), z.record(z.unknown())]).optional(),
+    parentId: documentIdSchema.nullable().optional(),
+  })
+  .strict()
 
 const updateDocsSchema = z
   .object({
@@ -14,10 +39,44 @@ const updateDocsSchema = z
   })
   .strict()
 
+function encodeCreateContent(value: unknown) {
+  let document = value
+  if (value === undefined || value === '') {
+    document = EMPTY_TIPTAP_DOCUMENT
+  } else if (typeof value === 'string') {
+    try {
+      document = JSON.parse(value)
+    } catch {
+      throw new ApiV1Error(422, 'invalid_content', 'Document content must contain valid TipTap JSON')
+    }
+  }
+  return encodeTiptapDocument(document)
+}
+
+function contentErrorResponse(error: ApiV1Error) {
+  const message = error.code === 'unsupported_content' ? 'Document content unsupported' : 'Document content invalid'
+  return Response.json(genErrorData(message), { status: error.status })
+}
+
 // 创建 doc
 export async function POST(request: Request) {
   const user = await getUserInfo()
   if (user == null) return Response.json(genUnAuthData())
+
+  let body: z.infer<typeof createDocSchema>
+  try {
+    const parsed = createDocSchema.safeParse(await readJsonBody(request, MAX_CREATE_REQUEST_BYTES))
+    if (!parsed.success) {
+      return Response.json(genErrorData('Create payload invalid'), { status: 400 })
+    }
+    body = parsed.data
+  } catch (error) {
+    if (error instanceof JsonBodyError) {
+      const message = error.code === 'payload_too_large' ? 'Create payload too large' : 'Create payload invalid'
+      return Response.json(genErrorData(message), { status: error.status })
+    }
+    throw error
+  }
 
   // 当前文档数量
   const docCount = await db.doc.count({
@@ -26,18 +85,24 @@ export async function POST(request: Request) {
       isDeleted: false,
     },
   })
-  if (docCount > MAX_DOC_COUNT) {
+  if (docCount >= MAX_DOC_COUNT) {
     return Response.json(genErrorData(`You only can create up to ${MAX_DOC_COUNT} docs`))
   }
 
-  const body = await request.json()
-  let { originId, id = undefined, title = '', content = '', parentId = null } = body
-  let contentBinary = null
+  const { originId, id, content: requestedContent } = body
+  let title = body.title || ''
+  let parentId = body.parentId || null
+  let content: string
+  let contentBinary: Buffer | null
 
   // 从 originId 复制一个
   if (originId) {
-    const originDoc = await db.doc.findUnique({
-      where: { id: originId },
+    const originDoc = await db.doc.findFirst({
+      where: {
+        id: originId,
+        userId: user.id,
+        isDeleted: false,
+      },
     })
     if (originDoc == null) {
       return Response.json(genErrorData('Origin doc not found'))
@@ -47,6 +112,29 @@ export async function POST(request: Request) {
     content = originDoc.content
     contentBinary = originDoc.contentBinary
     parentId = originDoc.parentId
+  } else {
+    try {
+      const encoded = encodeCreateContent(requestedContent)
+      content = encoded.contentJson
+      contentBinary = encoded.contentBinary
+    } catch (error) {
+      if (error instanceof ApiV1Error) return contentErrorResponse(error)
+      throw error
+    }
+  }
+
+  if (parentId) {
+    const parent = await db.doc.findFirst({
+      where: {
+        id: parentId,
+        userId: user.id,
+        isDeleted: false,
+      },
+      select: { id: true },
+    })
+    if (parent == null) {
+      return Response.json(genErrorData('Parent doc not found'))
+    }
   }
 
   // 创建 doc：按复制/新建后的父级重新计算同级末尾 sortOrder

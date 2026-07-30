@@ -16,16 +16,12 @@ export default function middleware(request: NextRequest) {
       ? savedLocale
       : routing.defaultLocale
     const localizedPath = pathname === '/' ? `/${locale}` : `/${locale}${pathname}`
-    const forwardedHost = request.headers.get('x-forwarded-host')?.split(',')[0]?.trim()
-    const host = forwardedHost || request.headers.get('host') || request.nextUrl.host
-    const forwardedProtocol = request.headers.get('x-forwarded-proto')?.split(',')[0]?.trim()
-    const protocol =
-      forwardedProtocol === 'http' || forwardedProtocol === 'https'
-        ? forwardedProtocol
-        : request.nextUrl.protocol.replace(':', '')
+    const redirectUrl = request.nextUrl.clone()
+    redirectUrl.pathname = localizedPath
+    redirectUrl.search = search
 
-    // Derive the origin from proxy headers so custom domains remain authoritative.
-    return NextResponse.redirect(new URL(`${localizedPath}${search}`, `${protocol}://${host}`))
+    // Do not trust client-controlled forwarding headers when constructing an absolute redirect.
+    return NextResponse.redirect(redirectUrl)
   }
 
   return handleI18nRouting(request)

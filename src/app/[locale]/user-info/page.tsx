@@ -1,6 +1,7 @@
 import { Link } from '@/i18n/routing'
 import HomeNav from '@/components/home-nav'
 import SignOutButton from '@/components/sign-out-button'
+import PersonalAccessTokenManager from '@/components/personal-access-token-manager'
 import { getUserInfo } from '@/lib/session'
 import { getTranslations } from 'next-intl/server'
 
@@ -20,16 +21,18 @@ export default async function UserTestPage() {
 
   return (
     <Wrapper>
-      {/* <p>session: {JSON.stringify(session)}</p> */}
-      <div className="flex flex-col items-center">
-        <p className="mb-6">
-          {t('haveLogin')},
-          <Link href="/" className="underline ml-1">
-            {t('goBackHome')}
-          </Link>
-        </p>
-        <SignOutButton>{t('logout')}</SignOutButton>
-      </div>
+      <main className="mx-auto w-full max-w-4xl space-y-6 px-4 py-24">
+        <div className="flex flex-col gap-4 rounded-lg border bg-card p-6 sm:flex-row sm:items-center sm:justify-between">
+          <p>
+            {t('haveLogin')},
+            <Link href="/" className="ml-1 underline">
+              {t('goBackHome')}
+            </Link>
+          </p>
+          <SignOutButton>{t('logout')}</SignOutButton>
+        </div>
+        <PersonalAccessTokenManager />
+      </main>
     </Wrapper>
   )
 }
@@ -37,7 +40,7 @@ export default async function UserTestPage() {
 // 容器
 function Wrapper({ children }: { children: React.ReactNode }) {
   return (
-    <div className="h-screen flex justify-center items-center">
+    <div className="min-h-screen bg-background">
       <HomeNav />
       {children}
     </div>

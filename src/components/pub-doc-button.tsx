@@ -34,7 +34,7 @@ export default function PubDocButton(props: IProps) {
   useEffect(() => {
     setUrlSuffix(id)
   }, [id])
-  const isUrlSuffixValid = useMemo(() => /^[a-zA-Z0-9_-]{8,}$/.test(urlSuffix), [urlSuffix]) // 字母 数字 下划线 横线 8+字符
+  const isUrlSuffixValid = useMemo(() => /^[a-zA-Z0-9_-]{8,128}$/.test(urlSuffix), [urlSuffix]) // 字母 数字 下划线 横线，8-128 字符
   const url = useMemo(() => {
     const baseUrl = process.env.NEXT_PUBLIC_APP_URL || (typeof window === 'undefined' ? '' : window.location.origin)
     return `${baseUrl.replace(/\/$/, '')}/pub/${urlSuffix}`

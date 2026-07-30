@@ -22,9 +22,6 @@ export const TableHeader = TiptapTableHeader.extend({
           return value
         },
       },
-      style: {
-        default: null,
-      },
     }
   },
 

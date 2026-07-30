@@ -1,5 +1,6 @@
 import { db } from '@/db/db'
 import { PUB_DOC_STATUS } from '@/lib/pub-doc-status'
+import { sanitizePublishedHtml } from '@/lib/sanitize-published-html'
 
 export async function getPubDocTitle(publishId: string) {
   try {
@@ -39,7 +40,10 @@ export async function getPubDoc(publishId: string) {
     })
     if (p == null) return null
     if (p.status === PUB_DOC_STATUS.UNPUBLISHED) return null
-    return p
+    return {
+      ...p,
+      htmlContent: sanitizePublishedHtml(p.htmlContent),
+    }
   } catch (err: any) {
     console.error('getPubDoc error: ', err)
     return null
