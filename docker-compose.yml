@@ -1,0 +1,33 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: doc
+      POSTGRES_USER: doc
+      POSTGRES_PASSWORD: doc
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U doc -d doc']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    ports:
+      - '5432:5432'
+    volumes:
+      - doc-postgres:/var/lib/postgresql/data
+
+  collaboration:
+    build:
+      context: ./services/collaboration
+    environment:
+      PORT: 1234
+      DATABASE_URL: postgresql://doc:doc@postgres:5432/doc?schema=public
+      API_AUTH_KEY: ${COLLABORATE_API_AUTH_KEY:-local-collaboration-token}
+      INTERNAL_API_KEY: ${COLLABORATE_INTERNAL_API_KEY:-local-internal-token}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - '1234:1234'
+
+volumes:
+  doc-postgres:

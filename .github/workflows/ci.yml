@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DATABASE_URL: postgresql://doc:doc@127.0.0.1:5432/doc?schema=public
+      NEXTAUTH_URL: http://localhost:3000
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
+      AUTH_SECRET: ci-only-secret
+      COLLABORATE_API_AUTH_KEY: ci-collaboration-token
+      COLLABORATE_INTERNAL_API_KEY: ci-internal-token
+      COLLABORATE_EDIT_HTTP_URL: http://localhost:1234
+      NEXT_PUBLIC_COLLABORATE_EDIT_URL: ws://localhost:1234/collaborate
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npm run format
+      - run: npm run lint
+      - run: npm run test-ci
+      - run: npm run build:collaboration
+      - run: npm run build

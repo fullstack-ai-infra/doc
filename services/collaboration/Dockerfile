@@ -1,0 +1,14 @@
+FROM node:24-alpine
+
+WORKDIR /app
+ENV NODE_ENV=production
+
+COPY package.json ./
+RUN npm install --omit=dev
+
+COPY src ./src
+
+USER node
+EXPOSE 1234
+
+CMD ["node", "src/index.js"]
