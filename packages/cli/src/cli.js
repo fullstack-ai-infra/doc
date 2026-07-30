@@ -1,6 +1,6 @@
 import { createRequire } from 'node:module'
 import { relative } from 'node:path'
-import { ApiClientError, createApiClient, normalizeApiBaseUrl } from './api-client.js'
+import { ApiClientError, createApiClient, normalizeApiBaseUrl, stripTerminalControlCharacters } from './api-client.js'
 import { capabilityGroups, capabilitySchemaVersion, capabilitySummary } from './capabilities.js'
 import {
   composeArgs,
@@ -400,7 +400,7 @@ function assertListMeta(value) {
 }
 
 function terminalText(value) {
-  return String(value ?? '').replace(/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g, '')
+  return stripTerminalControlCharacters(value)
 }
 
 function compactText(value) {

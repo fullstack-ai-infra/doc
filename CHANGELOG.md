@@ -43,4 +43,4 @@ All notable changes to `doc` are documented here.
 - Bounded and validated the legacy document-create route, storing canonical TipTap JSON together
   with matching Yjs state for new content.
 - Restricted published HTML classes and data attributes to the product's explicit TipTap feature
-  set, and neutralized terminal control sequences in human-readable CLI errors.
+  set, and neutralized terminal control sequences in CLI errors before PAT redaction.

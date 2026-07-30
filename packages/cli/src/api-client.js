@@ -3,6 +3,10 @@ const DEFAULT_MAX_RESPONSE_BYTES = 10 * 1024 * 1024
 const DOCUMENTS_PATH = '/api/v1/documents'
 const ME_PATH = '/api/v1/me'
 
+export function stripTerminalControlCharacters(value) {
+  return String(value ?? '').replace(/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g, '')
+}
+
 export class ApiClientError extends Error {
   constructor(message, options = {}) {
     super(message)
@@ -110,8 +114,10 @@ function parseResponseBody(content, response) {
 }
 
 function redact(value, token) {
-  if (typeof value !== 'string' || !token) return value
-  return value.split(token).join('[redacted]')
+  if (typeof value !== 'string') return value
+  const safeValue = stripTerminalControlCharacters(value)
+  const safeToken = stripTerminalControlCharacters(token)
+  return safeToken ? safeValue.split(safeToken).join('[redacted]') : safeValue
 }
 
 function responseError(response, payload, token) {

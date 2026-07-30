@@ -1088,6 +1088,38 @@ test('API errors, malformed responses, size limits, and timeouts are stable and 
   })
   assert.equal(unauthorized.stderr.includes(token), false)
 
+  const splitToken = `${token.slice(0, 12)}\u001b${token.slice(12)}`
+  const splitTokenPayload = {
+    error: {
+      code: `failed_${splitToken}`,
+      message: `failed ${splitToken}`,
+    },
+    requestId: `request-${splitToken}`,
+  }
+  const splitTokenHuman = await invoke(['ls'], {
+    ...baseOptions,
+    fetch: async () => apiResponse(splitTokenPayload, { status: 500 }),
+  })
+  assert.equal(splitTokenHuman.code, 1)
+  assert.equal(splitTokenHuman.stderr.includes(token), false)
+  assert.doesNotMatch(splitTokenHuman.stderr, /[\u0000-\u0009\u000b-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/)
+  assert.match(splitTokenHuman.stderr, /error: failed \[redacted\]/)
+  assert.match(splitTokenHuman.stderr, /request id: request-\[redacted\]/)
+
+  const splitTokenJson = await invoke(['ls', '--json'], {
+    ...baseOptions,
+    fetch: async () => apiResponse(splitTokenPayload, { status: 500 }),
+  })
+  assert.equal(splitTokenJson.code, 1)
+  assert.equal(splitTokenJson.stderr.includes(token), false)
+  assert.deepEqual(JSON.parse(splitTokenJson.stderr), {
+    error: 'failed [redacted]',
+    code: 'failed_[redacted]',
+    status: 500,
+    requestId: 'request-[redacted]',
+    exitCode: 1,
+  })
+
   const terminalInjection = await invoke(['ls'], {
     ...baseOptions,
     fetch: async () =>
