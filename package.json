@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "description": "A portable, self-hosted document plane for people and AI agents.",
   "private": true,
+  "packageManager": "npm@11.8.0",
   "workspaces": [
     "services/*"
   ],
