@@ -83,7 +83,7 @@ async function invoke(args, options = {}) {
     cwd: options.cwd,
     runner: options.runner,
     fetch: options.fetch,
-    env: options.env,
+    env: options.env ?? {},
     platform: options.platform,
     stdout,
     stderr,
