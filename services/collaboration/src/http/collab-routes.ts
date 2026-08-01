@@ -1,9 +1,22 @@
-const Router = require('@koa/router')
-const { createHash, timingSafeEqual } = require('node:crypto')
-const { hasActiveDocument } = require('../hocuspocus/active-docs')
-const { restoreActiveDocument } = require('../hocuspocus/restore')
+import Router from '@koa/router'
+import type Koa from 'koa'
+import { createHash, timingSafeEqual } from 'node:crypto'
 
-function hasValidInternalKey(ctx) {
+import { hasActiveDocument } from '../hocuspocus/active-docs.js'
+import { restoreActiveDocument } from '../hocuspocus/restore.js'
+import { errorMessage } from '../lib/error.js'
+
+interface RestoreBody {
+  contentBinaryBase64: string
+}
+
+function parseRestoreBody(body: unknown): RestoreBody | null {
+  if (body == null || typeof body !== 'object' || Array.isArray(body)) return null
+  const contentBinaryBase64 = (body as Record<string, unknown>).contentBinaryBase64
+  return typeof contentBinaryBase64 === 'string' && contentBinaryBase64.length > 0 ? { contentBinaryBase64 } : null
+}
+
+export function hasValidInternalKey(ctx: Pick<Koa.Context, 'get'>): boolean {
   const internalKey = process.env.INTERNAL_API_KEY || ''
   const providedKey = ctx.get('x-doc-internal-key')
   if (!internalKey || !providedKey) return false
@@ -13,7 +26,7 @@ function hasValidInternalKey(ctx) {
 }
 
 // 创建协同文档恢复路由。
-function createCollabRouter() {
+export function createCollabRouter(): Router {
   const router = new Router()
 
   router.post('/collab/documents/:docId/restore', async (ctx) => {
@@ -29,14 +42,13 @@ function createCollabRouter() {
         return
       }
 
-      const body = ctx.request.body || {}
-      const { contentBinaryBase64 } = body
+      const body = parseRestoreBody(ctx.request.body)
 
       if (!docId) {
         throw new Error('docId is required')
       }
 
-      if (!contentBinaryBase64) {
+      if (body == null) {
         throw new Error('contentBinaryBase64 is required')
       }
 
@@ -44,7 +56,7 @@ function createCollabRouter() {
         throw new Error('Active document not found')
       }
 
-      await restoreActiveDocument(docId, contentBinaryBase64)
+      await restoreActiveDocument(docId, body.contentBinaryBase64)
 
       ctx.body = {
         success: true,
@@ -52,19 +64,14 @@ function createCollabRouter() {
           docId,
         },
       }
-    } catch (err) {
+    } catch (error) {
       ctx.status = 400
       ctx.body = {
         success: false,
-        msg: err.message || 'restore failed',
+        msg: errorMessage(error, 'restore failed'),
       }
     }
   })
 
   return router
-}
-
-module.exports = {
-  createCollabRouter,
-  hasValidInternalKey,
 }

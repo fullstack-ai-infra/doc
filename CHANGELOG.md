@@ -22,6 +22,8 @@ All notable changes to `doc` are documented here.
 
 ### Changed
 
+- Migrated the collaboration service to strict TypeScript with native ESM build output, compiled
+  local/production start commands, and a multi-stage production image.
 - Replaced legacy product names, icons, domains, deployment workflows, and hosted marketing assets.
 - Parameterized collaboration database reads and protected internal restore calls.
 - Replaced private editor packages with reproducible public Tiptap extensions and refreshed the

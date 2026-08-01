@@ -6,6 +6,11 @@ The Next.js application remains at the repository root to keep its existing App 
 paths stable. Realtime collaboration lives in `services/collaboration` and is installed through npm
 workspaces.
 
+The collaboration workspace uses strict TypeScript and emits native ESM to
+`services/collaboration/dist`. Use `npm run dev:collaboration` for watch/rebuild/restart, or run
+`npm run build:collaboration` followed by `npm run start:collaboration` to exercise the same
+compiled entry point used by the container.
+
 The document version diff and directory drag-and-drop experiments have already been integrated into
 the main product. Do not retain parallel demo implementations.
 

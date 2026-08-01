@@ -1,9 +1,10 @@
-const nodemailer = require('nodemailer')
-require('dotenv').config()
+import 'dotenv/config'
+
+import nodemailer, { type SentMessageInfo } from 'nodemailer'
 
 const config = {
   host: process.env.EMAIL_HOST,
-  port: parseInt(process.env.EMAIL_PORT, 10),
+  port: Number.parseInt(process.env.EMAIL_PORT || '', 10),
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASSWORD,
@@ -11,7 +12,12 @@ const config = {
 }
 const transporter = nodemailer.createTransport(config)
 
-async function sendEmail(opt = {}) {
+export interface CollaborationEmail {
+  subject?: string
+  text?: string
+}
+
+export async function sendEmail(opt: CollaborationEmail = {}): Promise<SentMessageInfo | undefined> {
   const { subject = '', text = '' } = opt
   if (!subject) {
     console.error('subject required')
@@ -28,5 +34,3 @@ async function sendEmail(opt = {}) {
   console.log('Message sent: %s', res.messageId)
   return res
 }
-
-module.exports = { sendEmail }
