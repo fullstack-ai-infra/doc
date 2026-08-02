@@ -39,6 +39,14 @@ export async function POST(request: Request) {
       targetVersion,
     })
 
+    if (data.status === 'partial') {
+      return Response.json({
+        errno: -1,
+        msg: 'Document content restored, but title update failed',
+        data,
+      })
+    }
+
     return Response.json(genSuccessData(data))
   } catch (ex) {
     console.error('Restore doc version error', ex)

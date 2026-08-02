@@ -15,7 +15,7 @@ automation.
 | Rich-text editing  | available    | Tiptap headings, lists, tasks, tables, columns, images, links, code, Mermaid, slash commands, outline, and find/replace |
 | Templates          | available    | Todo, résumé, and project-highlight starters                                                                            |
 | Version history    | available    | JSON and Yjs snapshots, block-aware diff, current-state protection, and restore                                         |
-| Sharing            | experimental | READ/WRITE relations and notifications enforce owner/recipient boundaries; active WebSocket revocation still needs work |
+| Sharing            | experimental | READ/WRITE relations enforce owner/recipient boundaries and revoke matching active WebSocket connections                |
 | Publishing         | experimental | Public links, republish/unpublish, moderation, owner checks, public reading, and allowlist HTML sanitization exist      |
 | Export and uploads | available    | Browser-side PDF export plus compressed image upload through the current OSS adapter                                    |
 
@@ -30,18 +30,39 @@ Primary implementation paths:
 
 ## Collaboration
 
-| Capability       | Status       | Current implementation                                                                                                 |
-| ---------------- | ------------ | ---------------------------------------------------------------------------------------------------------------------- |
-| Realtime editing | available    | Yjs/Hocuspocus rooms, presence, collaboration cursors, reconnection state, and browser IndexedDB cache                 |
-| Authorization    | experimental | HTTP and WebSocket entry points check persisted owner/READ/WRITE access; active-connection revocation still needs work |
-| Persistence      | available    | Yjs binary state and JSON projection stored against the same document                                                  |
-| Recovery path    | experimental | Active-room restore exists, but there are no automated multi-client disconnect, recovery, or restore regression tests  |
+| Capability       | Status       | Current implementation                                                                                              |
+| ---------------- | ------------ | ------------------------------------------------------------------------------------------------------------------- |
+| Realtime editing | available    | Yjs/Hocuspocus rooms, presence, collaboration cursors, reconnection state, and browser IndexedDB cache              |
+| Authorization    | experimental | Entry and established-message checks use persisted owner/READ/WRITE access; revocation also closes matching sockets |
+| Persistence      | available    | Yjs binary state and JSON projection stored against the same document                                               |
+| Recovery path    | experimental | Restore first protects the current snapshot; concurrent replicas and active-room restore have multi-client tests    |
 
 Primary implementation paths:
 
 - `src/components/editor/hooks/useCreateEditor.ts`
 - `services/collaboration/src/hocuspocus/`
-- `services/collaboration/src/http/collab-routes.js`
+- `services/collaboration/src/http/collab-routes.ts`
+
+An established client is authorized again before each collaboration message. Revocation first
+marks the matching connection read-only and advances its authorization epoch before closing it; a
+database lookup that began earlier cannot reuse a stale WRITE result after that epoch changes. A
+persisted revocation, document soft-delete, or ownership change therefore fails closed even if the
+advisory socket-close request is unavailable. The close request uses an internal key and targets
+one exact document-user pair; access events contain identifiers, outcomes, and counts but no
+document content.
+
+Version restore is explicitly staged rather than described as atomic. The Web layer commits a
+recoverable current-state snapshot, then the collaboration service persists the target body before
+mutating or broadcasting the active Yjs room. A persistence failure leaves all connected replicas
+unchanged. If body restore succeeds but the final title projection fails, the API returns a
+structured partial result with a stable operation ID, a recovery snapshot ID, and `retryable: true`;
+reapplying the same immutable target and title is state-idempotent.
+
+While access is absent, a reconnect is rejected and locally retained offline updates do not enter
+the active room. A client that is granted access later must create a fresh authenticated connection;
+its browser-side IndexedDB state can then participate in normal Yjs reconciliation. The repository
+tests server-side reconnect denial and convergence, but does not yet automate browser IndexedDB
+lifecycle behavior.
 
 ## AI assistance
 
@@ -97,12 +118,11 @@ The following capabilities are not claimed:
 
 - Collaboration-aware replacement of existing document content through API v1
 - API/CLI delete, restore, version restore, publish, import, or export
-- Immediate revocation of already-connected collaboration sessions
 - Complete like/unlike persistence, user-level deduplication, and abuse controls
 - Provider-neutral object storage
 - Reviewed production Prisma migrations
 - Closure of the current framework, authentication, mail, and CSS toolchain security audit findings
-- Complete collaboration, permission, and recovery end-to-end coverage
+- Browser-level IndexedDB disconnect/reconnect and access-regrant recovery coverage
 - Complete audit events, rate limits, metrics, tracing, and structured logs
 
 The first remote CLI surface intentionally uses API v1 rather than direct Prisma writes. Content

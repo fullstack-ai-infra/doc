@@ -5,6 +5,7 @@ import { TiptapTransformer } from '@hocuspocus/transformer'
 import * as Y from 'yjs'
 
 import type { StoredDocumentRow } from '../src/db/doc.js'
+import { getShareRelationAccess, type ShareAccessDeps } from '../src/db/share-relation.js'
 import { dbFetch, dbStore, onAuthenticate } from '../src/hocuspocus/index.js'
 import { createTargetYdocFromBinary, replaceDocumentContent } from '../src/hocuspocus/restore.js'
 
@@ -89,5 +90,48 @@ describe('typed collaboration behavior baseline', () => {
     replaceDocumentContent(active, target)
 
     expect(TiptapTransformer.fromYdoc(active, 'default')).toEqual(JSON.parse(content))
+  })
+
+  it('uses the real persisted auth function for an owner-authored active share', async () => {
+    const query = vi
+      .fn<ShareAccessDeps['query']>()
+      .mockResolvedValueOnce({ rowCount: 0, rows: [] })
+      .mockResolvedValueOnce({ rowCount: 1, rows: [{ access: 'WRITE' }] })
+
+    await expect(getShareRelationAccess('doc-1', 'writer', { query, reconnect: vi.fn() })).resolves.toBe('WRITE')
+  })
+
+  it.each(['soft-delete', 'owner-transfer'] as const)(
+    'fails real persisted auth closed when a %s commits between its owner and relation reads',
+    async (boundaryChange) => {
+      let queryCount = 0
+      const query = vi.fn<ShareAccessDeps['query']>(async (sql) => {
+        queryCount += 1
+        if (queryCount === 1) {
+          expect(sql).toContain('"isDeleted" = false')
+          // The lifecycle mutation commits after the owner lookup but before the share lookup.
+          return { rowCount: 0, rows: [] }
+        }
+        expect(sql).toContain('relation."authorId" = doc."userId"')
+        expect(sql).toContain('doc."isDeleted" = false')
+        expect(boundaryChange === 'soft-delete' || boundaryChange === 'owner-transfer').toBe(true)
+        return { rowCount: 0, rows: [] }
+      })
+      const reconnect = vi.fn()
+
+      await expect(getShareRelationAccess('doc-1', 'former-owner', { query, reconnect })).resolves.toBeNull()
+
+      expect(query).toHaveBeenCalledTimes(2)
+      expect(reconnect).not.toHaveBeenCalled()
+    }
+  )
+
+  it('fails persisted auth closed when either database read errors', async () => {
+    const query = vi.fn<ShareAccessDeps['query']>().mockRejectedValueOnce(new Error('transaction unavailable'))
+    const reconnect = vi.fn()
+
+    await expect(getShareRelationAccess('doc-1', 'former-owner', { query, reconnect })).resolves.toBeNull()
+
+    expect(reconnect).toHaveBeenCalledTimes(1)
   })
 })

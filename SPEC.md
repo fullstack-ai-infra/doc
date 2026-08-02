@@ -21,7 +21,7 @@ This document describes the current implementation, not an aspirational API.
 - Strict TypeScript source compiled to native Node.js ESM for local and container production starts
 - Shared PostgreSQL document state
 - Encrypted short-lived user tokens for WebSocket authentication
-- Separate internal key for restore and monitor operations
+- Separate internal key for restore, active-access invalidation, and monitor operations
 
 ### Operations CLI
 
@@ -53,24 +53,37 @@ The Prisma schema is the source of truth for field-level definitions.
 1. Browser sessions authenticate through NextAuth.
 2. API v1 accepts only scoped Bearer PATs and never falls back to a browser session.
 3. WebSocket connections use a short-lived encrypted token carrying `userId`.
-4. The collaboration service rechecks document access in PostgreSQL.
-5. Internal restore and monitor calls require `COLLABORATE_INTERNAL_API_KEY`.
+4. The collaboration service checks document access in PostgreSQL at connection entry and before
+   every established-connection message. A missing grant, soft-deleted document, or changed owner
+   fails closed. Revocation advances a connection-local authorization epoch, and an in-flight
+   lookup must still match that epoch after its database await.
+5. Internal restore, exact document-user socket invalidation, and monitor calls require
+   `COLLABORATE_INTERNAL_API_KEY`.
 6. AI provider and object-storage credentials remain server-side.
 
 ## Version restore
 
 1. Validate the authenticated user owns the document.
 2. Validate the requested historical version belongs to that document.
-3. Persist the current JSON and Yjs binary state as a new version.
-4. Restore the selected state through the active collaboration room.
-5. Persist the restored title and content.
+3. Commit the current JSON and Yjs binary state as a new recovery version and retain its ID.
+4. Persist the selected target binary and JSON projection in the collaboration service.
+5. Only after persistence succeeds, replace and broadcast the active Yjs room state.
+6. Update the title to the immutable target version's title.
 
 If an active collaboration room is unavailable, the operation fails instead of reporting a false
 success.
 
+Concurrent replicas receive the active room's restored Yjs state and converge on that state. A
+target-persistence failure occurs before the room mutation, so connected replicas remain unchanged.
+The sequence is not globally atomic: if the body succeeds and the title update fails, the API
+returns a structured partial result containing a stable `operationId`, the `recoverySnapshotId`,
+and retry metadata. Repeating the same document/immutable-version restore is state-idempotent, and
+each attempt retains its own recovery snapshot.
+
 ## Known gaps
 
-- The collaboration service needs deeper automated integration tests.
+- Browser IndexedDB disconnect/reconnect and access-regrant behavior needs automated integration
+  coverage.
 - API v1 does not yet replace existing content, delete/restore, manage versions, or publish.
 - Object storage is coupled to an OSS client and needs a provider interface.
 - CLI version restore, publish, and workspace import/export remain deferred.

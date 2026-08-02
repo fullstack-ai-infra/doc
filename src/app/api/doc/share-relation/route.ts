@@ -6,6 +6,7 @@ import { sendEmail } from '@/lib/mailer'
 import { MAX_SHARE_COUNT } from '@/constants'
 import { DOCUMENT_ACCESS, getDocumentAccess } from '@/lib/document-access'
 import { readJsonBody } from '@/lib/read-json-body'
+import { notifyCollaborationAccessRevoked } from '@/lib/collaboration-access'
 
 const MAX_SHARE_REQUEST_BYTES = 16 * 1024
 const DUPLICATE_SHARE_MESSAGE = 'Document is already shared with this user'
@@ -156,6 +157,10 @@ export async function DELETE(request: Request) {
         userId: relation.userId,
       },
     })
+
+    // This eagerly closes matching sockets. The collaboration service also rechecks persisted
+    // access before each message, so revocation remains fail-closed when notification is down.
+    await notifyCollaborationAccessRevoked(relation.docId, relation.userId)
 
     void sendEmail({
       subject: `doc: "${user.name || user.email}" 取消了文档分享 / canceled a document share`,

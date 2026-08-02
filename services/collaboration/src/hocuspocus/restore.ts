@@ -103,7 +103,7 @@ export async function persistRestoredDocument(docId: string, binary: Uint8Array,
   return rowCount
 }
 
-// 执行活动房间正文恢复并回写恢复后的数据库状态。
+// 先持久化目标状态，再修改活动房间。持久化失败时不能向任何客户端广播恢复结果。
 export async function restoreActiveDocument(
   docId: string,
   contentBinaryBase64: string,
@@ -119,17 +119,14 @@ export async function restoreActiveDocument(
 
   const binary = decodeBinaryFromBase64(contentBinaryBase64)
   const targetDoc = createTargetYdocFromBinary(binary)
+  const targetJsonStr = serializeYdocToJsonString(targetDoc)
 
+  await persistDocument(docId, binary, targetJsonStr)
   replaceDocumentContent(activeDoc, targetDoc)
-
-  const restoredBinary = Y.encodeStateAsUpdate(activeDoc)
-  const restoredJsonStr = serializeYdocToJsonString(activeDoc)
-
-  await persistDocument(docId, restoredBinary, restoredJsonStr)
 
   return {
     docId,
-    contentBinary: restoredBinary,
-    content: restoredJsonStr,
+    contentBinary: binary,
+    content: targetJsonStr,
   }
 }

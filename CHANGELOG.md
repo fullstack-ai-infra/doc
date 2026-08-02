@@ -24,6 +24,14 @@ All notable changes to `doc` are documented here.
 
 - Migrated the collaboration service to strict TypeScript with native ESM build output, compiled
   local/production start commands, and a multi-stage production image.
+- Regenerated the workspace lock with npm 11.8 so clean root and collaboration-only production
+  installs resolve the same native and SWC helper dependency graph.
+- Revalidated persisted document access before each established WebSocket message, eagerly closed
+  exact document-user connections after share revocation, invalidated raced authorization epochs,
+  and added content-free access events.
+- Preserved the current document snapshot before active-room version restore and added concurrent
+  multi-client convergence, persist-before-broadcast restore, observable partial-title recovery,
+  revoked-writer, unaffected-collaborator, and reconnect tests.
 - Replaced legacy product names, icons, domains, deployment workflows, and hosted marketing assets.
 - Parameterized collaboration database reads and protected internal restore calls.
 - Replaced private editor packages with reproducible public Tiptap extensions and refreshed the
