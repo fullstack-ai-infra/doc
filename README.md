@@ -22,14 +22,14 @@
 
 ## What is in this repository?
 
-| Component                 | Purpose                                    |
-| ------------------------- | ------------------------------------------ |
-| `src/`                    | Next.js 产品界面、HTTP API、认证与文档能力 |
-| `services/collaboration/` | Hocuspocus/Yjs 实时协作服务                |
-| `packages/cli/`           | `doc` 远程文档与本地运维 CLI               |
-| `prisma/`                 | PostgreSQL 文档、权限、发布和版本数据模型  |
-| `docker-compose.yml`      | PostgreSQL、迁移、协作与 Web 完整服务栈    |
-| `docs/`                   | 开发、运行与架构说明                       |
+| Component                 | Purpose                                          |
+| ------------------------- | ------------------------------------------------ |
+| `src/`                    | Next.js 产品界面、HTTP API、认证与文档能力       |
+| `services/collaboration/` | Hocuspocus/Yjs 实时协作服务                      |
+| `packages/cli/`           | `doc` 远程文档与本地运维 CLI                     |
+| `prisma/`                 | PostgreSQL 文档、权限、发布和版本数据模型        |
+| `docker-compose.yml`      | PostgreSQL、Mailpit、迁移、协作与 Web 本地服务栈 |
+| `docs/`                   | 开发、运行与架构说明                             |
 
 ## 当前能力
 
@@ -84,11 +84,15 @@ doc init
 doc doctor
 doc up --build
 doc doctor --live
+npm run verify:local-loop
 ```
 
-打开 <http://localhost:3000>。登录后可在用户设置创建 scoped PAT，再通过 `doc auth login`
-连接。CLI 契约见 [docs/CLI.md](docs/CLI.md)，API 契约见 [docs/API.md](docs/API.md)，完整配置
-和分服务启动方式见 [docs/RUN_LOCAL.md](docs/RUN_LOCAL.md)。
+打开 <http://localhost:3100>，输入邮箱地址，再到 Mailpit <http://localhost:8025> 打开登录链接。
+登录后创建第一篇文档，编辑并刷新页面即可验证持久化闭环。这条路径不需要 GitHub、
+邮件或 AI 凭证。登录后也可在用户设置创建 scoped PAT，再通过 `doc auth login`
+连接。`npm run verify:local-loop` 可自动重复同一条登录与持久化闭环，并清理测试文档。
+CLI 契约见 [docs/CLI.md](docs/CLI.md)，API 契约见 [docs/API.md](docs/API.md)，完整配置
+和端口调整方式见 [docs/RUN_LOCAL.md](docs/RUN_LOCAL.md)。
 
 ## 开发
 

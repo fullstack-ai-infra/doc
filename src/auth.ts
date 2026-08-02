@@ -9,44 +9,15 @@ import Resend from 'next-auth/providers/resend'
 // 其他 provider 看这里 https://github.com/nextauthjs/next-auth/blob/main/apps/examples/nextjs/auth.ts
 
 import type { NextAuthConfig } from 'next-auth'
-
-// 拼接 SMTP 服务器地址
-function genEmailSmtpPServer() {
-  const from = process.env.EMAIL_FROM || ''
-  const host = process.env.EMAIL_HOST || ''
-  const port = process.env.EMAIL_PORT || ''
-  const password = process.env.EMAIL_PASSWORD || ''
-
-  const username = from.split('@')[0]
-
-  const server = `smtp://${username}:${password}@${host}:${port}`
-  // console.log('Email Server:', server)
-  return server
-}
+import { resolveAuthConfiguration } from '@/lib/auth-configuration'
 
 function genProviders() {
-  const env = process.env.NODE_ENV || 'development'
-  const providers = []
+  const configuration = resolveAuthConfiguration()
+  const providers: NextAuthConfig['providers'] = []
 
-  providers.push(GitHub)
-
-  if (env === 'production') {
-    // 线上环境使用 resend 发送邮件
-    providers.push(
-      Resend({
-        apiKey: process.env.RESEND_API_KEY || '',
-        from: process.env.EMAIL_FROM || 'no-reply@example.com',
-      })
-    )
-  } else {
-    // 开发环境使用 nodemailer 发送邮件
-    providers.push(
-      Email({
-        server: genEmailSmtpPServer(),
-        from: process.env.EMAIL_FROM,
-      })
-    )
-  }
+  if (configuration.github) providers.push(GitHub(configuration.github))
+  if (configuration.smtp) providers.push(Email(configuration.smtp))
+  if (configuration.resend) providers.push(Resend(configuration.resend))
 
   return providers
 }

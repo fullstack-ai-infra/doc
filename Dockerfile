@@ -34,7 +34,7 @@ COPY . .
 # Uncomment the following line in case you want to disable telemetry during the build.
 # ENV NEXT_TELEMETRY_DISABLED 1
 
-ARG NEXT_PUBLIC_APP_URL=http://localhost:3000
+ARG NEXT_PUBLIC_APP_URL=http://localhost:3100
 ARG NEXT_PUBLIC_COLLABORATE_EDIT_URL=ws://localhost:1234/collaborate
 ARG NEXT_PUBLIC_OSS_CDN_HOSTNAME
 ENV NEXT_PUBLIC_APP_URL=$NEXT_PUBLIC_APP_URL \

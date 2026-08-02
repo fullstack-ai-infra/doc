@@ -1,6 +1,7 @@
 import { createRequire } from 'node:module'
 import { relative } from 'node:path'
 import { ApiClientError, createApiClient, normalizeApiBaseUrl, stripTerminalControlCharacters } from './api-client.js'
+import { hasUsableAuthPath } from './auth-config.js'
 import { capabilityGroups, capabilitySchemaVersion, capabilitySummary } from './capabilities.js'
 import {
   composeArgs,
@@ -40,7 +41,7 @@ const EXIT = {
   dependency: 5,
 }
 
-const COMPOSE_SERVICES = new Set(['postgres', 'migrate', 'collaboration', 'web'])
+const COMPOSE_SERVICES = new Set(['postgres', 'mailpit', 'migrate', 'collaboration', 'web'])
 const JSON_COMMANDS = new Set([
   'auth',
   'capabilities',
@@ -152,7 +153,7 @@ Commands:
   create                Create a document through the authenticated API
   update <id>           Update document metadata through the authenticated API
   capabilities          List delivered and experimental product capabilities
-  init                  Create private environment files with generated secrets
+  init                  Create or safely merge private environment files
   doctor                Check local dependencies, configuration, and optional live services
   up [service...]       Build and start the container stack
   down                  Stop the container stack without deleting data
@@ -203,14 +204,14 @@ Update document metadata. --force sends If-Match: * and is mutually exclusive wi
 List the current product capability inventory. Experimental surfaces are labeled explicitly.`,
   init: `Usage: doc init [--force --yes] [--dry-run]
 
-Create .env and services/collaboration/.env with three independent random secrets.
-Existing files are never overwritten unless both --force and --yes are provided.
+Create .env and services/collaboration/.env with three independent random secrets and local Mailpit SMTP defaults.
+Missing safe defaults are merged into existing files without replacing configured values.
 Forced initialization preserves non-secret values and rotates all generated secrets.`,
   doctor: `Usage: doc doctor [--live] [--json]
 
 Check Node.js, Docker, Compose, environment values, and Compose configuration.
-Use --live to also probe the Web and collaboration health endpoints.`,
-  up: `Usage: doc up [postgres|migrate|collaboration|web ...] [--build] [--foreground]
+Use --live to also probe Web, authentication, SMTP, local Mailpit, and collaboration health.`,
+  up: `Usage: doc up [postgres|mailpit|migrate|collaboration|web ...] [--build] [--foreground]
 
 Start the full stack by default. In detached mode Compose waits for healthy services.`,
   down: `Usage: doc down
@@ -219,12 +220,12 @@ Stop the stack. This command never deletes the PostgreSQL volume.`,
   status: `Usage: doc status [--json]
 
 Show status for this checkout's isolated Compose project.`,
-  logs: `Usage: doc logs [postgres|migrate|collaboration|web] [--follow] [--tail <lines>]
+  logs: `Usage: doc logs [postgres|mailpit|migrate|collaboration|web] [--follow] [--tail <lines>]
 
 Read service logs. --follow can be shortened to -f.`,
   dev: `Usage: doc dev [--skip-infra]
 
-Start PostgreSQL and collaboration in containers, push the local schema, then run Next.js.`,
+Start PostgreSQL, Mailpit, and collaboration in containers, push the local schema, then run Next.js.`,
   db: `Usage: doc db <generate|push>
 
 Run Prisma generation or an explicit local schema push. db push refuses non-local database hosts.`,
@@ -253,6 +254,9 @@ async function requireRuntimeEnv(envPath, processEnv) {
   const secrets = [env.AUTH_SECRET, env.COLLABORATE_API_AUTH_KEY, env.COLLABORATE_INTERNAL_API_KEY]
   if (new Set(secrets).size !== secrets.length) {
     throw new UsageError('AUTH_SECRET and both collaboration keys must all be different')
+  }
+  if (!hasUsableAuthPath(env)) {
+    throw new UsageError('No usable authentication path; configure complete GitHub, SMTP, or Resend settings')
   }
   return env
 }
@@ -310,6 +314,14 @@ function databaseIsLocal(databaseUrl) {
   } catch {
     return false
   }
+}
+
+function localWebPort(env) {
+  const value = env.DOC_WEB_PORT || '3100'
+  if (!/^\d+$/.test(value) || Number(value) < 1 || Number(value) > 65535) {
+    throw new UsageError('DOC_WEB_PORT must be an integer between 1 and 65535')
+  }
+  return value
 }
 
 function validateDocumentId(value) {
@@ -879,6 +891,12 @@ export async function runCli(argv, overrides = {}) {
         for (const path of result.overwritten) {
           write(stdout, `${result.dryRun ? 'would overwrite' : 'overwrote'} ${relative(root, path)}`)
         }
+        for (const path of result.updated) {
+          write(
+            stdout,
+            `${result.dryRun ? 'would update' : 'updated'} ${relative(root, path)} (merged missing defaults)`
+          )
+        }
         for (const path of result.skipped) write(stdout, `kept ${relative(root, path)} (already exists)`)
         write(stdout, result.dryRun ? 'init: dry run complete' : 'init: configuration ready')
       }
@@ -895,6 +913,7 @@ export async function runCli(argv, overrides = {}) {
         live: flags.live,
         npmExecutable: npmCommand(platform),
         fetchImpl,
+        smtpProbe: overrides.smtpProbe,
         platform,
         processEnv,
       })
@@ -993,7 +1012,7 @@ export async function runCli(argv, overrides = {}) {
       if (!flags['skip-infra']) {
         const infrastructure = await runner.run(
           'docker',
-          [...compose, 'up', '-d', '--wait', '--wait-timeout', '60', 'postgres', 'collaboration'],
+          [...compose, 'up', '-d', '--wait', '--wait-timeout', '60', 'postgres', 'mailpit', 'collaboration'],
           { cwd: root, env }
         )
         if (infrastructure.code !== 0) {
@@ -1002,7 +1021,10 @@ export async function runCli(argv, overrides = {}) {
         const schema = await runner.run(npmCommand(platform), ['run', 'db:push'], { cwd: root, env })
         if (schema.code !== 0) return normalizedProcessExit(schema)
       }
-      const result = await runner.run(npmCommand(platform), ['run', 'dev'], { cwd: root, env })
+      const result = await runner.run(npmCommand(platform), ['run', 'dev', '--', '--port', localWebPort(env)], {
+        cwd: root,
+        env,
+      })
       return normalizedProcessExit(result)
     }
 

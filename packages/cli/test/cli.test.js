@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { Readable } from 'node:stream'
 import test from 'node:test'
+import { resolveAuthConfiguration } from '../src/auth-config.js'
 import { runCli } from '../src/cli.js'
 import { resolveConfigPaths } from '../src/config.js'
 import { readSecretToken } from '../src/input.js'
@@ -58,9 +59,21 @@ async function createProject() {
   await writeFile(
     join(root, '.env.example'),
     [
-      'NEXT_PUBLIC_APP_URL=http://localhost:3000',
+      'DOC_WEB_PORT=3100',
+      'DOC_COLLABORATION_PORT=1234',
+      'DOC_POSTGRES_PORT=5432',
+      'DOC_MAILPIT_SMTP_PORT=1025',
+      'DOC_MAILPIT_UI_PORT=8025',
+      'DOC_MAILPIT_URL=http://localhost:8025',
+      'NEXT_PUBLIC_APP_URL=http://localhost:3100',
       'AUTH_SECRET=replace-with-a-random-secret',
       'DATABASE_URL=postgresql://doc:doc@localhost:5432/doc?schema=public',
+      'EMAIL_FROM=doc@example.test',
+      'EMAIL_HOST=127.0.0.1',
+      'EMAIL_PORT=1025',
+      'EMAIL_CONTAINER_HOST=mailpit',
+      'EMAIL_CONTAINER_PORT=1025',
+      'EMAIL_SECURE=false',
       'COLLABORATE_EDIT_HTTP_URL=http://localhost:1234',
       'COLLABORATE_API_AUTH_KEY=replace-with-a-shared-token-key',
       'COLLABORATE_INTERNAL_API_KEY=replace-with-an-internal-service-key',
@@ -87,6 +100,7 @@ async function invoke(args, options = {}) {
     cwd: options.cwd,
     runner: options.runner,
     fetch: options.fetch,
+    smtpProbe: options.smtpProbe,
     env: options.env ?? {},
     stdin: options.stdin,
     readToken: options.readToken,
@@ -170,6 +184,10 @@ test('init creates private files with distinct generated secrets', async () => {
   assert.notEqual(rootEnv.COLLABORATE_API_AUTH_KEY, rootEnv.COLLABORATE_INTERNAL_API_KEY)
   assert.equal(collaborationEnv.API_AUTH_KEY, rootEnv.COLLABORATE_API_AUTH_KEY)
   assert.equal(collaborationEnv.INTERNAL_API_KEY, rootEnv.COLLABORATE_INTERNAL_API_KEY)
+  assert.equal(rootEnv.NEXT_PUBLIC_APP_URL, 'http://localhost:3100')
+  assert.equal(rootEnv.EMAIL_HOST, '127.0.0.1')
+  assert.equal(rootEnv.EMAIL_PORT, '1025')
+  assert.equal(rootEnv.EMAIL_FROM, 'doc@example.test')
   assert.equal((await stat(join(root, '.env'))).mode & 0o777, 0o600)
   assert.match(await readFile(join(root, '.doc', 'instance-id'), 'utf8'), /^[a-f0-9]{20}\n$/)
 })
@@ -193,20 +211,20 @@ test('init requires explicit confirmation before overwrite', async () => {
   assert.match(result.stderr, /--force requires --yes/)
 })
 
-test('init refuses a placeholder root file without creating a mismatched service file', async () => {
+test('init repairs a placeholder root file and creates a matching service file', async () => {
   const root = await createProject()
   await writeFile(join(root, '.env'), await readFile(join(root, '.env.example'), 'utf8'))
 
   const result = await invoke(['init', '--root', root], { cwd: tmpdir() })
 
-  assert.equal(result.code, 2)
-  assert.match(result.stderr, /incomplete or inconsistent/)
-  await assert.rejects(readFile(join(root, 'services', 'collaboration', '.env'), 'utf8'), {
-    code: 'ENOENT',
-  })
+  assert.equal(result.code, 0)
+  const rootEnv = parseEnv(await readFile(join(root, '.env'), 'utf8'))
+  const collaborationEnv = parseEnv(await readFile(join(root, 'services', 'collaboration', '.env'), 'utf8'))
+  assert.ok(rootEnv.AUTH_SECRET.length >= 32)
+  assert.equal(collaborationEnv.API_AUTH_KEY, rootEnv.COLLABORATE_API_AUTH_KEY)
 })
 
-test('init refuses a placeholder service file without creating a mismatched root file', async () => {
+test('init repairs a placeholder service file and creates a matching root file', async () => {
   const root = await createProject()
   await writeFile(
     join(root, 'services', 'collaboration', '.env'),
@@ -215,9 +233,71 @@ test('init refuses a placeholder service file without creating a mismatched root
 
   const result = await invoke(['init', '--root', root], { cwd: tmpdir() })
 
-  assert.equal(result.code, 2)
-  assert.match(result.stderr, /incomplete or inconsistent/)
-  await assert.rejects(readFile(join(root, '.env'), 'utf8'), { code: 'ENOENT' })
+  assert.equal(result.code, 0)
+  const rootEnv = parseEnv(await readFile(join(root, '.env'), 'utf8'))
+  const collaborationEnv = parseEnv(await readFile(join(root, 'services', 'collaboration', '.env'), 'utf8'))
+  assert.equal(collaborationEnv.INTERNAL_API_KEY, rootEnv.COLLABORATE_INTERNAL_API_KEY)
+})
+
+test('init merges missing local defaults without replacing existing values', async () => {
+  const root = await createProject()
+  await invoke(['init', '--root', root], { cwd: tmpdir() })
+  const envPath = join(root, '.env')
+  const before = parseEnv(await readFile(envPath, 'utf8'))
+  const legacy = (await readFile(envPath, 'utf8'))
+    .split('\n')
+    .filter(
+      (line) =>
+        !line.startsWith('DOC_WEB_PORT=') &&
+        !line.startsWith('DOC_MAILPIT_URL=') &&
+        !line.startsWith('EMAIL_CONTAINER_HOST=')
+    )
+    .join('\n')
+    .replace('NEXT_PUBLIC_APP_URL=http://localhost:3100', 'NEXT_PUBLIC_APP_URL=https://docs.example.test')
+  await writeFile(envPath, legacy)
+
+  const result = await invoke(['init', '--root', root], { cwd: tmpdir() })
+  const after = parseEnv(await readFile(envPath, 'utf8'))
+
+  assert.equal(result.code, 0)
+  assert.match(result.stdout, /updated \.env \(merged missing defaults\)/)
+  assert.equal(after.DOC_WEB_PORT, '3100')
+  assert.equal(after.DOC_MAILPIT_URL, 'http://localhost:8025')
+  assert.equal(after.EMAIL_CONTAINER_HOST, 'mailpit')
+  assert.equal(after.NEXT_PUBLIC_APP_URL, 'https://docs.example.test')
+  assert.equal(after.AUTH_SECRET, before.AUTH_SECRET)
+
+  await writeFile(
+    envPath,
+    (await readFile(envPath, 'utf8'))
+      .split('\n')
+      .filter((line) => !line.startsWith('DOC_MAILPIT_URL='))
+      .join('\n')
+  )
+  const forced = await invoke(['init', '--force', '--yes', '--root', root], { cwd: tmpdir() })
+  const forcedValues = parseEnv(await readFile(envPath, 'utf8'))
+  assert.equal(forced.code, 0)
+  assert.equal(forcedValues.DOC_MAILPIT_URL, 'http://localhost:8025')
+  assert.equal(forcedValues.NEXT_PUBLIC_APP_URL, 'https://docs.example.test')
+  assert.notEqual(forcedValues.AUTH_SECRET, before.AUTH_SECRET)
+})
+
+test('init does not add local SMTP defaults to complete external authentication', async () => {
+  const root = await createProject()
+  await invoke(['init', '--root', root], { cwd: tmpdir() })
+  const envPath = join(root, '.env')
+  const withoutLocalSmtp = (await readFile(envPath, 'utf8'))
+    .split('\n')
+    .filter((line) => !/^EMAIL_(?:FROM|HOST|PORT|CONTAINER_HOST|CONTAINER_PORT|USERNAME|PASSWORD|SECURE)=/.test(line))
+    .join('\n')
+  await writeFile(envPath, `${withoutLocalSmtp}\nAUTH_GITHUB_ID=github-id\nAUTH_GITHUB_SECRET=github-secret\n`)
+
+  const result = await invoke(['init', '--root', root], { cwd: tmpdir() })
+  const after = parseEnv(await readFile(envPath, 'utf8'))
+
+  assert.equal(result.code, 0)
+  assert.equal(after.AUTH_GITHUB_ID, 'github-id')
+  assert.equal(after.EMAIL_HOST, undefined)
 })
 
 test('init refuses paths outside the checkout and symbolic-link targets', async () => {
@@ -244,7 +324,7 @@ test('forced init rotates secrets without resetting optional configuration', asy
   const original = await readFile(envPath, 'utf8')
   const before = parseEnv(original)
   const customized = original
-    .replace('http://localhost:3000', 'https://docs.example.com')
+    .replace('http://localhost:3100', 'https://docs.example.com')
     .replace(`AUTH_SECRET=${before.AUTH_SECRET}`, `export AUTH_SECRET = ${before.AUTH_SECRET}`)
   await writeFile(envPath, customized)
 
@@ -270,10 +350,44 @@ test('doctor validates configuration without exposing secret values', async () =
   const payload = JSON.parse(result.stdout)
   assert.equal(payload.ok, true)
   assert.equal(payload.checks.find((item) => item.id === 'env:collaboration-keys').status, 'pass')
+  assert.equal(payload.checks.find((item) => item.id === 'env:auth').status, 'pass')
   assert.equal(payload.checks.find((item) => item.id === 'env:permissions').status, 'pass')
   const env = parseEnv(await readFile(join(root, '.env'), 'utf8'))
   assert.equal(result.stdout.includes(env.AUTH_SECRET), false)
   assert.equal(result.stdout.includes(env.COLLABORATE_API_AUTH_KEY), false)
+})
+
+test('doctor redacts every configured credential from Compose failures', async () => {
+  const root = await createProject()
+  await invoke(['init', '--root', root], { cwd: tmpdir() })
+  const envPath = join(root, '.env')
+  const credentials = {
+    AUTH_GITHUB_SECRET: 'github-client-secret',
+    EMAIL_PASSWORD: 'smtp-password',
+    RESEND_API_KEY: 'resend-api-key',
+  }
+  await writeFile(
+    envPath,
+    `${await readFile(envPath, 'utf8')}AUTH_GITHUB_ID=github-id\n${Object.entries(credentials)
+      .map(([key, value]) => `${key}=${value}`)
+      .join('\n')}\n`
+  )
+  const databaseUrl = parseEnv(await readFile(envPath, 'utf8')).DATABASE_URL
+  const runner = fakeRunner({
+    capture(command, args) {
+      if (command === 'docker' && args.includes('config')) {
+        return { code: 1, stdout: '', stderr: `${Object.values(credentials).join(' ')} ${databaseUrl}` }
+      }
+    },
+  })
+
+  const result = await invoke(['doctor', '--json', '--root', root], { cwd: tmpdir(), runner })
+
+  assert.equal(result.code, 1)
+  for (const credential of [...Object.values(credentials), databaseUrl]) {
+    assert.equal(result.stdout.includes(credential), false)
+  }
+  assert.match(result.stdout, /\[redacted\]/)
 })
 
 test('doctor rejects environment files readable by other users', async () => {
@@ -291,19 +405,45 @@ test('doctor rejects environment files readable by other users', async () => {
   assert.equal(payload.checks.find((item) => item.id === 'env:permissions').status, 'fail')
 })
 
+test('doctor fails instead of reporting healthy when no authentication path is usable', async () => {
+  const root = await createProject()
+  await invoke(['init', '--root', root], { cwd: tmpdir() })
+  const envPath = join(root, '.env')
+  const withoutAuth = (await readFile(envPath, 'utf8'))
+    .replace('EMAIL_FROM=doc@example.test', 'EMAIL_FROM=')
+    .replace('EMAIL_HOST=127.0.0.1', 'EMAIL_HOST=')
+  await writeFile(envPath, withoutAuth)
+
+  const result = await invoke(['doctor', '--json', '--root', root], {
+    cwd: tmpdir(),
+    runner: fakeRunner(),
+  })
+  const payload = JSON.parse(result.stdout)
+
+  assert.equal(result.code, 1)
+  assert.equal(payload.checks.find((item) => item.id === 'env:auth').status, 'fail')
+})
+
 test('live doctor checks database-aware readiness endpoints', async () => {
   const root = await createProject()
   await invoke(['init', '--root', root], { cwd: tmpdir() })
   const urls = []
+  const smtpCalls = []
   const result = await invoke(['doctor', '--live', '--json', '--root', root], {
     cwd: tmpdir(),
     runner: fakeRunner(),
+    smtpProbe: async ({ host, port }) => {
+      smtpCalls.push(`${host}:${port}`)
+    },
     fetch: async (url) => {
       urls.push(url)
       return {
         ok: true,
         status: 200,
         async json() {
+          if (url.endsWith('/api/auth/providers')) {
+            return { nodemailer: { id: 'nodemailer', type: 'email' } }
+          }
           return url.endsWith('/ready')
             ? { service: 'doc-collaboration', status: 'ok', checks: { database: 'ok' } }
             : { service: 'doc-web', status: 'ok', checks: { database: 'ok' } }
@@ -313,7 +453,52 @@ test('live doctor checks database-aware readiness endpoints', async () => {
   })
 
   assert.equal(result.code, 0)
-  assert.deepEqual(urls, ['http://localhost:3000/api/health', 'http://localhost:1234/ready'])
+  assert.deepEqual(smtpCalls, ['127.0.0.1:1025'])
+  assert.deepEqual(urls, [
+    'http://localhost:3100/api/health',
+    'http://localhost:3100/api/auth/providers',
+    'http://localhost:8025/readyz',
+    'http://localhost:1234/ready',
+  ])
+})
+
+test('live doctor reports SMTP and Mailpit failures independently', async () => {
+  const root = await createProject()
+  await invoke(['init', '--root', root], { cwd: tmpdir() })
+  const fetchHealth = (mailpitOk) => async (url) => ({
+    ok: !url.endsWith('/readyz') || mailpitOk,
+    status: url.endsWith('/readyz') && !mailpitOk ? 503 : 200,
+    async json() {
+      if (url.endsWith('/api/auth/providers')) return { nodemailer: { id: 'nodemailer', type: 'email' } }
+      return url.endsWith('/ready')
+        ? { service: 'doc-collaboration', status: 'ok', checks: { database: 'ok' } }
+        : { service: 'doc-web', status: 'ok', checks: { database: 'ok' } }
+    },
+  })
+
+  const smtpFailure = await invoke(['doctor', '--live', '--json', '--root', root], {
+    cwd: tmpdir(),
+    runner: fakeRunner(),
+    smtpProbe: async () => {
+      throw new Error('connection refused')
+    },
+    fetch: fetchHealth(true),
+  })
+  const smtpPayload = JSON.parse(smtpFailure.stdout)
+  assert.equal(smtpFailure.code, 1)
+  assert.equal(smtpPayload.checks.find((item) => item.id === 'live:smtp').status, 'fail')
+  assert.equal(smtpPayload.checks.find((item) => item.id === 'live:mailpit').status, 'pass')
+
+  const mailpitFailure = await invoke(['doctor', '--live', '--json', '--root', root], {
+    cwd: tmpdir(),
+    runner: fakeRunner(),
+    smtpProbe: async () => {},
+    fetch: fetchHealth(false),
+  })
+  const mailpitPayload = JSON.parse(mailpitFailure.stdout)
+  assert.equal(mailpitFailure.code, 1)
+  assert.equal(mailpitPayload.checks.find((item) => item.id === 'live:smtp').status, 'pass')
+  assert.equal(mailpitPayload.checks.find((item) => item.id === 'live:mailpit').status, 'fail')
 })
 
 test('doctor fails when the environment has not been initialized', async () => {
@@ -342,6 +527,24 @@ test('up uses an isolated Compose project and waits for health', async () => {
   assert.ok(call.args.includes('--wait'))
   assert.equal(call.options.cwd, root)
   assert.ok(call.options.env.AUTH_SECRET)
+})
+
+test('Compose exposes parameterized loopback ports and a pinned Mailpit service', async () => {
+  const compose = await readFile(new URL('../../../docker-compose.yml', import.meta.url), 'utf8')
+
+  assert.match(compose, /axllent\/mailpit:v1\.30\.0/)
+  for (const variable of [
+    'DOC_WEB_PORT',
+    'DOC_COLLABORATION_PORT',
+    'DOC_POSTGRES_PORT',
+    'DOC_MAILPIT_SMTP_PORT',
+    'DOC_MAILPIT_UI_PORT',
+  ]) {
+    assert.match(compose, new RegExp(`127\\.0\\.0\\.1:\\$\\{${variable}`))
+  }
+  assert.match(compose, /EMAIL_HOST: \$\{EMAIL_CONTAINER_HOST:-\$\{EMAIL_HOST:-mailpit\}\}/)
+  assert.match(compose, /EMAIL_PORT: \$\{EMAIL_CONTAINER_PORT:-\$\{EMAIL_PORT:-1025\}\}/)
+  assert.match(compose, /depends_on:[\s\S]*?mailpit:\n\s+condition: service_healthy/)
 })
 
 test('down never deletes volumes and bypasses missing or malformed project environments', async () => {
@@ -419,7 +622,7 @@ test('db generate does not require a runtime environment file', async () => {
   assert.deepEqual(call.args, ['exec', '--', 'prisma', 'generate'])
 })
 
-test('dev passes the selected environment to local processes', async () => {
+test('dev passes the selected environment and parameterized Web port to local processes', async () => {
   const root = await createProject()
   await invoke(['init', '--root', root], { cwd: tmpdir() })
   const runner = fakeRunner()
@@ -427,9 +630,56 @@ test('dev passes the selected environment to local processes', async () => {
 
   assert.equal(result.code, 0)
   const call = runner.calls.find((item) => item.type === 'run')
-  assert.deepEqual(call.args, ['run', 'dev'])
+  assert.deepEqual(call.args, ['run', 'dev', '--', '--port', '3100'])
   assert.ok(call.options.env.AUTH_SECRET)
   assert.equal(call.options.env.DATABASE_URL, 'postgresql://doc:doc@localhost:5432/doc?schema=public')
+})
+
+test('dev accepts a custom Web port without editing Compose', async () => {
+  const root = await createProject()
+  await invoke(['init', '--root', root], { cwd: tmpdir() })
+  const runner = fakeRunner()
+  const result = await invoke(['dev', '--skip-infra', '--root', root], {
+    cwd: tmpdir(),
+    runner,
+    env: { DOC_WEB_PORT: '4100' },
+  })
+
+  assert.equal(result.code, 0)
+  const call = runner.calls.find((item) => item.type === 'run')
+  assert.deepEqual(call.args, ['run', 'dev', '--', '--port', '4100'])
+})
+
+test('dev starts Mailpit with the other local infrastructure', async () => {
+  const root = await createProject()
+  await invoke(['init', '--root', root], { cwd: tmpdir() })
+  const runner = fakeRunner()
+  const result = await invoke(['dev', '--root', root], { cwd: tmpdir(), runner })
+
+  assert.equal(result.code, 0)
+  const infrastructure = runner.calls.find(
+    (item) => item.type === 'run' && item.command === 'docker' && item.args.includes('up')
+  )
+  assert.ok(infrastructure.args.includes('mailpit'))
+})
+
+test('authentication paths require complete provider configuration', () => {
+  assert.deepEqual(resolveAuthConfiguration({ AUTH_GITHUB_ID: 'partial' }).providerIds, [])
+  assert.deepEqual(resolveAuthConfiguration({ AUTH_GITHUB_ID: 'id', AUTH_GITHUB_SECRET: 'secret' }).providerIds, [
+    'github',
+  ])
+  assert.deepEqual(
+    resolveAuthConfiguration({
+      EMAIL_FROM: 'doc@example.test',
+      EMAIL_HOST: '127.0.0.1',
+      EMAIL_PORT: '1025',
+    }).providerIds,
+    ['nodemailer']
+  )
+  assert.deepEqual(
+    resolveAuthConfiguration({ EMAIL_FROM: 'doc@example.test', RESEND_API_KEY: 'resend-key' }).providerIds,
+    ['resend']
+  )
 })
 
 test('dev refuses a remote database before starting infrastructure', async () => {

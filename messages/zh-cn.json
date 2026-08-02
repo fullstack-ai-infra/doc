@@ -116,7 +116,9 @@
     "others": "使用其他方式",
     "email": "邮箱",
     "enterYourEmail": "输入你的邮箱",
-    "withEmail": "使用邮箱登录"
+    "withEmail": "使用邮箱登录",
+    "loading": "正在加载登录方式…",
+    "unavailable": "当前未配置可用的登录方式，请联系实例管理员。"
   },
   "verifyRequest": {
     "title": "检查你的邮件",

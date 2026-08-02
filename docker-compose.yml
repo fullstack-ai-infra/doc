@@ -1,3 +1,4 @@
+# Loopback-only local development stack. This is not a production deployment topology.
 services:
   postgres:
     image: postgres:16-alpine
@@ -11,9 +12,20 @@ services:
       timeout: 3s
       retries: 20
     ports:
-      - '127.0.0.1:5432:5432'
+      - '127.0.0.1:${DOC_POSTGRES_PORT:-5432}:5432'
     volumes:
       - doc-postgres:/var/lib/postgresql/data
+
+  mailpit:
+    image: axllent/mailpit:v1.30.0
+    healthcheck:
+      test: ['CMD', '/mailpit', 'readyz']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    ports:
+      - '127.0.0.1:${DOC_MAILPIT_SMTP_PORT:-1025}:1025'
+      - '127.0.0.1:${DOC_MAILPIT_UI_PORT:-8025}:8025'
 
   collaboration:
     build:
@@ -39,7 +51,7 @@ services:
       timeout: 3s
       retries: 20
     ports:
-      - '127.0.0.1:1234:1234'
+      - '127.0.0.1:${DOC_COLLABORATION_PORT:-1234}:1234'
 
   migrate:
     build:
@@ -57,21 +69,23 @@ services:
     build:
       context: .
       args:
-        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
+        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3100}
         NEXT_PUBLIC_COLLABORATE_EDIT_URL: ${NEXT_PUBLIC_COLLABORATE_EDIT_URL:-ws://localhost:1234/collaborate}
         NEXT_PUBLIC_OSS_CDN_HOSTNAME: ${NEXT_PUBLIC_OSS_CDN_HOSTNAME:-}
     environment:
       NODE_ENV: production
       DATABASE_URL: postgresql://doc:doc@postgres:5432/doc?schema=public
       AUTH_SECRET: ${AUTH_SECRET:?AUTH_SECRET is required}
-      NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3000}
-      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
+      NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3100}
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3100}
       AUTH_GITHUB_ID: ${AUTH_GITHUB_ID:-}
       AUTH_GITHUB_SECRET: ${AUTH_GITHUB_SECRET:-}
       EMAIL_FROM: ${EMAIL_FROM:-}
-      EMAIL_HOST: ${EMAIL_HOST:-}
-      EMAIL_PORT: ${EMAIL_PORT:-587}
+      EMAIL_HOST: ${EMAIL_CONTAINER_HOST:-${EMAIL_HOST:-mailpit}}
+      EMAIL_PORT: ${EMAIL_CONTAINER_PORT:-${EMAIL_PORT:-1025}}
+      EMAIL_USERNAME: ${EMAIL_USERNAME:-}
       EMAIL_PASSWORD: ${EMAIL_PASSWORD:-}
+      EMAIL_SECURE: ${EMAIL_SECURE:-false}
       RESEND_API_KEY: ${RESEND_API_KEY:-}
       NOTICE_EMAIL_TO: ${NOTICE_EMAIL_TO:-}
       OSS_ACCESS_KEY_ID: ${OSS_ACCESS_KEY_ID:-}
@@ -85,6 +99,8 @@ services:
       COLLABORATE_API_AUTH_KEY: ${COLLABORATE_API_AUTH_KEY:?COLLABORATE_API_AUTH_KEY is required}
       COLLABORATE_INTERNAL_API_KEY: ${COLLABORATE_INTERNAL_API_KEY:?COLLABORATE_INTERNAL_API_KEY is required}
     depends_on:
+      mailpit:
+        condition: service_healthy
       migrate:
         condition: service_completed_successfully
       collaboration:
@@ -101,7 +117,7 @@ services:
       timeout: 3s
       retries: 30
     ports:
-      - '127.0.0.1:3000:3000'
+      - '127.0.0.1:${DOC_WEB_PORT:-3100}:3000'
 
 volumes:
   doc-postgres:

@@ -105,10 +105,12 @@ doc init
 doc doctor
 doc up --build
 doc doctor --live
+npm run verify:local-loop
 doc status
 ```
 
-Open <http://localhost:3000>.
+Open <http://localhost:3100>. Email magic links are captured by the zero-credential Mailpit inbox
+at <http://localhost:8025>.
 
 `doc init` writes `.env` and `services/collaboration/.env` with mode `0600`. It creates independent
 random values for:
@@ -117,9 +119,20 @@ random values for:
 - `COLLABORATE_API_AUTH_KEY`
 - `COLLABORATE_INTERNAL_API_KEY`
 
-Secret values are never printed. Existing files are kept unless both `--force` and `--yes` are
-present. Forced initialization preserves non-secret configuration and rotates all three generated
-secrets.
+It also writes loopback-only host ports and a safe local SMTP path through Mailpit. Re-running
+`doc init` merges missing non-secret defaults without replacing configured values. `doc doctor`
+requires at least one complete GitHub, SMTP, or Resend provider, while `doc doctor --live` verifies
+the providers exposed by the running Web service, the configured SMTP endpoint, local Mailpit when
+applicable, and the database-aware Web and collaboration health endpoints.
+
+Secret values are never printed. Existing configured values are kept during a normal merge.
+Forced initialization requires both `--force` and `--yes`; it preserves non-secret configuration
+and rotates all three generated secrets.
+
+`npm run verify:local-loop` is the repeatable end-to-end check for a running local stack. It uses
+Mailpit to establish a browser-equivalent email session, creates and updates a document, re-reads
+the persisted state, then removes the generated document. It does not emit the magic link, session
+cookie, or token.
 
 ## Command surface
 
@@ -133,9 +146,9 @@ secrets.
 | `doc create --title TITLE [--parent ID] [--content-file FILE\|-]` | Create a document                                                          |
 | `doc update ID [fields] (--if-match ETAG\|--force)`               | Guarded metadata update                                                    |
 | `doc capabilities [--json]`                                       | Print the delivered/experimental capability inventory                      |
-| `doc init [--dry-run] [--force --yes]`                            | Create, or explicitly rotate, private environment files                    |
+| `doc init [--dry-run] [--force --yes]`                            | Create or merge private environments; explicitly rotate generated secrets  |
 | `doc doctor [--live] [--json]`                                    | Validate dependencies, configuration, Compose, and optional live endpoints |
-| `doc up [service...] [--build] [--foreground]`                    | Start the full stack or selected services                                  |
+| `doc up [service...] [--build] [--foreground]`                    | Start the full stack or selected services, including local Mailpit         |
 | `doc down`                                                        | Stop the stack without deleting PostgreSQL data                            |
 | `doc status [--json]`                                             | Inspect services in this checkout's isolated Compose project               |
 | `doc logs [service] [-f] [--tail N]`                              | Read service logs                                                          |

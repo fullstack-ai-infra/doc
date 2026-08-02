@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import { access, chmod, lstat, mkdir, readFile, realpath, rename, unlink, writeFile } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { hasUsableAuthPath } from './auth-config.js'
 
 const PROJECT_PACKAGE = '@fullstack-ai-infra/doc'
 const INSTANCE_DIRECTORY = '.doc'
@@ -89,6 +90,58 @@ function replaceEnvValue(content, key, value) {
   const pattern = new RegExp(`^\\s*(?:export\\s+)?${key}\\s*=.*$`, 'gm')
   const withoutExistingValues = content.replace(pattern, '').replace(/\n{3,}/g, '\n\n')
   return `${withoutExistingValues.trimEnd()}\n${line}\n`
+}
+
+function ensureEnvValue(content, key, value) {
+  return parseEnv(content)[key] === value ? content : replaceEnvValue(content, key, value)
+}
+
+const LOCAL_SMTP_KEYS = new Set([
+  'EMAIL_FROM',
+  'EMAIL_HOST',
+  'EMAIL_PORT',
+  'EMAIL_CONTAINER_HOST',
+  'EMAIL_CONTAINER_PORT',
+  'EMAIL_USERNAME',
+  'EMAIL_PASSWORD',
+  'EMAIL_SECURE',
+])
+
+function usesLocalSmtp(values) {
+  const host = values.EMAIL_HOST?.trim().toLowerCase()
+  return ['localhost', '127.0.0.1', '::1', '[::1]', 'mailpit'].includes(host)
+}
+
+function mergeMissingEnvValues(content, template, { includeLocalSmtp = true } = {}) {
+  const existingValues = parseEnv(content)
+  let result = content
+  for (const [key, value] of Object.entries(parseEnv(template))) {
+    if (Object.hasOwn(existingValues, key)) continue
+    if (!includeLocalSmtp && LOCAL_SMTP_KEYS.has(key)) continue
+    result = replaceEnvValue(result, key, value)
+  }
+  return result
+}
+
+function applyLegacyLocalSmtpDefaults(content, template, originalValues) {
+  const templateValues = parseEnv(template)
+  let result = content
+  for (const key of LOCAL_SMTP_KEYS) {
+    const current = parseEnv(result)[key]
+    if ((current === undefined || current.trim() === '') && templateValues[key]?.trim()) {
+      result = replaceEnvValue(result, key, templateValues[key])
+    }
+  }
+
+  const legacyBlankSmtp =
+    !originalValues.EMAIL_FROM?.trim() &&
+    !originalValues.EMAIL_HOST?.trim() &&
+    !originalValues.EMAIL_USERNAME?.trim() &&
+    !originalValues.EMAIL_USER?.trim() &&
+    !originalValues.EMAIL_PASSWORD?.trim() &&
+    (!originalValues.EMAIL_PORT || originalValues.EMAIL_PORT === '587')
+  if (legacyBlankSmtp) result = replaceEnvValue(result, 'EMAIL_PORT', templateValues.EMAIL_PORT)
+  return result
 }
 
 function generatedSecret() {
@@ -206,8 +259,12 @@ export async function initializeEnvironment(root, options = {}) {
     throw new ProjectConfigurationError('Collaboration environment path resolves outside the project root')
   }
   await rejectSymlink(collaborationEnvPath, 'Collaboration environment file')
-  const existingRootValues = rootExists ? await readEnv(rootEnvPath) : {}
-  const existingCollaborationValues = collaborationExists ? await readEnv(collaborationEnvPath) : {}
+  const rootTemplateContent = await readFile(rootTemplatePath, 'utf8')
+  const collaborationTemplateContent = await readFile(collaborationTemplatePath, 'utf8')
+  const existingRootContent = rootExists ? await readFile(rootEnvPath, 'utf8') : ''
+  const existingCollaborationContent = collaborationExists ? await readFile(collaborationEnvPath, 'utf8') : ''
+  const existingRootValues = parseEnv(existingRootContent)
+  const existingCollaborationValues = parseEnv(existingCollaborationContent)
   const authSecret =
     !options.force && isConfiguredSecret(existingRootValues.AUTH_SECRET)
       ? existingRootValues.AUTH_SECRET
@@ -225,28 +282,33 @@ export async function initializeEnvironment(root, options = {}) {
         ? existingCollaborationValues.INTERNAL_API_KEY
         : generatedSecret()
 
-  let rootContent =
-    rootExists && options.force ? await readFile(rootEnvPath, 'utf8') : await readFile(rootTemplatePath, 'utf8')
-  rootContent = replaceEnvValue(rootContent, 'AUTH_SECRET', authSecret)
-  rootContent = replaceEnvValue(rootContent, 'COLLABORATE_API_AUTH_KEY', collaborationKey)
-  rootContent = replaceEnvValue(rootContent, 'COLLABORATE_INTERNAL_API_KEY', internalKey)
+  const installLocalSmtp = rootExists && (!hasUsableAuthPath(existingRootValues) || usesLocalSmtp(existingRootValues))
+  let rootContent = rootExists
+    ? mergeMissingEnvValues(existingRootContent, rootTemplateContent, { includeLocalSmtp: installLocalSmtp })
+    : rootTemplateContent
+  if (installLocalSmtp) {
+    rootContent = applyLegacyLocalSmtpDefaults(rootContent, rootTemplateContent, existingRootValues)
+  }
+  rootContent = ensureEnvValue(rootContent, 'AUTH_SECRET', authSecret)
+  rootContent = ensureEnvValue(rootContent, 'COLLABORATE_API_AUTH_KEY', collaborationKey)
+  rootContent = ensureEnvValue(rootContent, 'COLLABORATE_INTERNAL_API_KEY', internalKey)
   const rootValues = parseEnv(rootContent)
 
-  let collaborationContent =
-    collaborationExists && options.force
-      ? await readFile(collaborationEnvPath, 'utf8')
-      : await readFile(collaborationTemplatePath, 'utf8')
-  collaborationContent = replaceEnvValue(
-    collaborationContent,
-    'DATABASE_URL',
-    existingRootValues.DATABASE_URL || rootValues.DATABASE_URL
-  )
-  collaborationContent = replaceEnvValue(collaborationContent, 'API_AUTH_KEY', collaborationKey)
-  collaborationContent = replaceEnvValue(collaborationContent, 'INTERNAL_API_KEY', internalKey)
+  let collaborationContent = collaborationExists
+    ? mergeMissingEnvValues(existingCollaborationContent, collaborationTemplateContent)
+    : collaborationTemplateContent
+  if (!collaborationExists || options.force || !existingCollaborationValues.DATABASE_URL) {
+    collaborationContent = ensureEnvValue(
+      collaborationContent,
+      'DATABASE_URL',
+      existingRootValues.DATABASE_URL || rootValues.DATABASE_URL
+    )
+  }
+  collaborationContent = ensureEnvValue(collaborationContent, 'API_AUTH_KEY', collaborationKey)
+  collaborationContent = ensureEnvValue(collaborationContent, 'INTERNAL_API_KEY', internalKey)
 
-  const effectiveRootValues = rootExists && !options.force ? existingRootValues : parseEnv(rootContent)
-  const effectiveCollaborationValues =
-    collaborationExists && !options.force ? existingCollaborationValues : parseEnv(collaborationContent)
+  const effectiveRootValues = parseEnv(rootContent)
+  const effectiveCollaborationValues = parseEnv(collaborationContent)
   if (!validEnvironmentPair(effectiveRootValues, effectiveCollaborationValues)) {
     throw new ProjectConfigurationError(
       'Environment files are incomplete or inconsistent; repair them with "doc init --force --yes"'
@@ -254,20 +316,27 @@ export async function initializeEnvironment(root, options = {}) {
   }
 
   const files = [
-    { path: rootEnvPath, content: rootContent, existed: rootExists },
-    { path: collaborationEnvPath, content: collaborationContent, existed: collaborationExists },
+    { path: rootEnvPath, content: rootContent, previousContent: existingRootContent, existed: rootExists },
+    {
+      path: collaborationEnvPath,
+      content: collaborationContent,
+      previousContent: existingCollaborationContent,
+      existed: collaborationExists,
+    },
   ]
-  const result = { created: [], overwritten: [], skipped: [], dryRun: Boolean(options.dryRun) }
+  const result = { created: [], updated: [], overwritten: [], skipped: [], dryRun: Boolean(options.dryRun) }
   const instance = await ensureInstanceId(root, result.dryRun)
   if (instance.created) result.created.push(instance.path)
 
   for (const file of files) {
-    if (file.existed && !options.force) {
+    const changed = !file.existed || file.content !== file.previousContent
+    if (file.existed && !changed) {
       result.skipped.push(file.path)
       continue
     }
     if (!options.dryRun) await writePrivateFile(file.path, file.content, file.existed)
-    if (file.existed) result.overwritten.push(file.path)
+    if (file.existed && options.force) result.overwritten.push(file.path)
+    else if (file.existed) result.updated.push(file.path)
     else result.created.push(file.path)
   }
 

@@ -116,7 +116,9 @@
     "others": "OR CONTINUE WITH",
     "email": "Email",
     "enterYourEmail": "Enter your email address",
-    "withEmail": "Continue with Email"
+    "withEmail": "Continue with Email",
+    "loading": "Loading sign-in options…",
+    "unavailable": "No sign-in method is configured. Ask the instance operator to configure one."
   },
   "verifyRequest": {
     "title": "Check your email",
