@@ -3,6 +3,7 @@ import { Logger } from '@hocuspocus/extension-logger'
 import {
   Server,
   type afterLoadDocumentPayload,
+  type beforeHandleMessagePayload,
   type fetchPayload,
   type onAuthenticatePayload,
   type onDisconnectPayload,
@@ -13,9 +14,15 @@ import { TiptapTransformer } from '@hocuspocus/transformer'
 import * as Y from 'yjs'
 
 import { getDocById, updateDocBinary, updateDocJsonStr } from '../db/doc.js'
-import { getShareRelationAccess, updateShareRelationNoticeType } from '../db/share-relation.js'
+import { getShareRelationAccess, updateShareRelationNoticeType, type DocumentAccess } from '../db/share-relation.js'
 import { decryptToken } from '../lib/token.js'
 import { removeActiveDocument, setActiveDocument } from './active-docs.js'
+import {
+  adaptHocuspocusMessage,
+  closeUserConnections,
+  emitCollaborationAccessEvent,
+  enforceActiveConnectionAccess,
+} from './access-control.js'
 import { basicExts } from './exts.js'
 
 export interface CollaborationContext {
@@ -115,6 +122,15 @@ export async function onAuthenticate(
   }
 }
 
+// Recheck persisted authorization before every message from an established connection. This
+// closes the notification-failure window after a share is revoked or a document is deleted.
+export async function beforeHandleMessage(data: beforeHandleMessagePayload): Promise<DocumentAccess> {
+  return enforceActiveConnectionAccess(adaptHocuspocusMessage(data), {
+    getShareRelationAccess,
+    emitAccessEvent: emitCollaborationAccessEvent,
+  })
+}
+
 // 在文档加载完成后登记当前活动房间的 Y.Doc。
 export async function afterLoadDocument(data: afterLoadDocumentPayload): Promise<void> {
   setActiveDocument(data.documentName, data.document)
@@ -129,6 +145,7 @@ export async function onDisconnect(data: onDisconnectPayload): Promise<void> {
 
 export const hocuspocusServer = Server.configure({
   onAuthenticate,
+  beforeHandleMessage,
   onStoreDocument,
   afterLoadDocument,
   onDisconnect,
@@ -140,3 +157,9 @@ export const hocuspocusServer = Server.configure({
     }),
   ],
 })
+
+export function revokeActiveAccess(docId: string, userId: string): number {
+  return closeUserConnections(hocuspocusServer, docId, userId, {
+    emitAccessEvent: emitCollaborationAccessEvent,
+  })
+}

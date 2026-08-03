@@ -6,6 +6,7 @@ import type { Server } from 'node:http'
 import { startCollaborationService, type CollaborationRuntimeDeps } from '../src/index.js'
 
 const servers: Server[] = []
+const originalInternalKey = process.env.INTERNAL_API_KEY
 
 afterEach(async () => {
   await Promise.all(
@@ -15,6 +16,8 @@ afterEach(async () => {
         (server) => new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())))
       )
   )
+  if (originalInternalKey == null) delete process.env.INTERNAL_API_KEY
+  else process.env.INTERNAL_API_KEY = originalInternalKey
 })
 
 describe('compiled collaboration runtime contract', () => {
@@ -27,6 +30,7 @@ describe('compiled collaboration runtime contract', () => {
       checkDatabase: vi.fn(async () => {}),
       selectMonitorDocument: vi.fn(async () => null),
       handleConnection: vi.fn(),
+      revokeActiveAccess: vi.fn(() => 0),
     }
 
     const server = await startCollaborationService(0, deps)
@@ -54,6 +58,7 @@ describe('compiled collaboration runtime contract', () => {
       }),
       selectMonitorDocument: vi.fn(async () => null),
       handleConnection: vi.fn(),
+      revokeActiveAccess: vi.fn(() => 0),
     }
     const server = await startCollaborationService(0, deps)
     servers.push(server)
@@ -64,5 +69,32 @@ describe('compiled collaboration runtime contract', () => {
 
     expect(response.status).toBe(503)
     expect(JSON.stringify(await response.json())).not.toContain('private database URL')
+  })
+
+  it('bounds access-revocation bodies before route handling', async () => {
+    process.env.INTERNAL_API_KEY = 'expected-key'
+    const deps: CollaborationRuntimeDeps = {
+      connectDatabase: vi.fn(async () => {}),
+      checkDatabase: vi.fn(async () => {}),
+      selectMonitorDocument: vi.fn(async () => null),
+      handleConnection: vi.fn(),
+      revokeActiveAccess: vi.fn(() => 0),
+    }
+    const server = await startCollaborationService(0, deps)
+    servers.push(server)
+    const address = server.address()
+    if (address == null || typeof address === 'string') throw new Error('test server address unavailable')
+
+    const response = await fetch(`http://127.0.0.1:${address.port}/collab/documents/doc-1/access/revoke`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-doc-internal-key': 'expected-key',
+      },
+      body: JSON.stringify({ userId: 'x'.repeat(5_000) }),
+    })
+
+    expect(response.status).toBe(413)
+    expect(deps.revokeActiveAccess).not.toHaveBeenCalled()
   })
 })

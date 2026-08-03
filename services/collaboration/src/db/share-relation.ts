@@ -8,18 +8,32 @@ interface AccessRow extends QueryResultRow {
   access: DocumentAccess
 }
 
+export interface ShareAccessDeps {
+  query: (sql: string, values: string[]) => Promise<{ rowCount: number | null; rows: AccessRow[] }>
+  reconnect: () => void | Promise<void>
+}
+
+const defaultShareAccessDeps: ShareAccessDeps = {
+  query: (sql, values) => pgClient.query<AccessRow>(sql, values),
+  reconnect,
+}
+
 /**
  * Get share relation
  * @param {string} docId doc id
  * @param {string} userId user id
  * @returns {string | null} 'ADMIN' | 'READ' | 'WRITE' | null
  */
-export async function getShareRelationAccess(docId: string, userId: string): Promise<DocumentAccess | null> {
+export async function getShareRelationAccess(
+  docId: string,
+  userId: string,
+  deps: ShareAccessDeps = defaultShareAccessDeps
+): Promise<DocumentAccess | null> {
   try {
     // check if the doc is mine
     const getDocSQL = `select id from "Doc" where id = $1 and "userId" = $2 and "isDeleted" = false`
     const getDocValues = [docId, userId]
-    const getDocResult = await pgClient.query(getDocSQL, getDocValues)
+    const getDocResult = await deps.query(getDocSQL, getDocValues)
     // console.log('getDocResult...', getDocResult.rowCount)
     if ((getDocResult.rowCount ?? 0) > 0) {
       return 'ADMIN'
@@ -37,12 +51,12 @@ export async function getShareRelationAccess(docId: string, userId: string): Pro
       limit 1
     `
     const getShareRelationValues = [docId, userId]
-    const getShareRelationResult = await pgClient.query<AccessRow>(getShareRelationSQL, getShareRelationValues)
+    const getShareRelationResult = await deps.query(getShareRelationSQL, getShareRelationValues)
     // console.log('getShareRelationResult...', getShareRelationResult.rows[0])
     return getShareRelationResult.rows[0]?.access || null
   } catch {
     console.error('hocuspocus db getShareRelationAccess error')
-    void reconnect()
+    void deps.reconnect()
     return null
   }
 }

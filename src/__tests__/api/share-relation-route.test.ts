@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   relationDeleteMany: vi.fn(),
   relationUpdateMany: vi.fn(),
   sendEmail: vi.fn(),
+  notifyCollaborationAccessRevoked: vi.fn(),
 }))
 
 vi.mock('server-only', () => ({}))
@@ -32,6 +33,9 @@ vi.mock('@/db/db', () => ({
   },
 }))
 vi.mock('@/lib/mailer', () => ({ sendEmail: mocks.sendEmail }))
+vi.mock('@/lib/collaboration-access', () => ({
+  notifyCollaborationAccessRevoked: mocks.notifyCollaborationAccessRevoked,
+}))
 
 import { DELETE, PATCH, POST } from '@/app/api/doc/share-relation/route'
 
@@ -52,6 +56,7 @@ describe('/api/doc/share-relation permissions', () => {
       name: 'Owner',
     })
     mocks.sendEmail.mockResolvedValue(undefined)
+    mocks.notifyCollaborationAccessRevoked.mockResolvedValue(true)
   })
 
   it('strictly rejects undeclared create fields', async () => {
@@ -290,6 +295,25 @@ describe('/api/doc/share-relation permissions', () => {
         userId: 'reader',
       },
     })
+    expect(mocks.notifyCollaborationAccessRevoked).toHaveBeenCalledWith('doc-1', 'reader')
+  })
+
+  it('keeps revocation successful when eager collaboration invalidation is unavailable', async () => {
+    mocks.relationFindFirst.mockResolvedValue({
+      id: 'relation-2',
+      docId: 'doc-1',
+      userId: 'reader',
+      doc: { title: 'Private notes' },
+      user: { email: 'reader@example.com' },
+    })
+    mocks.relationDeleteMany.mockResolvedValue({ count: 1 })
+    mocks.notifyCollaborationAccessRevoked.mockResolvedValue(false)
+
+    const response = await DELETE(jsonRequest('DELETE', { id: 'relation-2' }))
+
+    expect((await response.json()).errno).toBe(0)
+    expect(mocks.relationDeleteMany).toHaveBeenCalledTimes(1)
+    expect(mocks.notifyCollaborationAccessRevoked).toHaveBeenCalledTimes(1)
   })
 
   it('only allows a recipient to acknowledge its own notice as NONE', async () => {

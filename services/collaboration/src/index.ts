@@ -11,7 +11,7 @@ import type WebSocket from 'ws'
 
 import { connect, pgClient } from './db/client.js'
 import { selectOneDocForMonitor } from './db/doc.js'
-import { hocuspocusServer } from './hocuspocus/index.js'
+import { hocuspocusServer, revokeActiveAccess } from './hocuspocus/index.js'
 import { createCollabRouter, hasValidInternalKey } from './http/collab-routes.js'
 
 type WebsocketFactory = (typeof import('koa-easy-ws'))['default']
@@ -23,6 +23,7 @@ export interface CollaborationRuntimeDeps {
   checkDatabase: () => Promise<void>
   selectMonitorDocument: typeof selectOneDocForMonitor
   handleConnection: (socket: WebSocket, request: Koa.Request['req']) => void
+  revokeActiveAccess: (docId: string, userId: string) => number | Promise<number>
 }
 
 const defaultRuntimeDeps: CollaborationRuntimeDeps = {
@@ -32,17 +33,30 @@ const defaultRuntimeDeps: CollaborationRuntimeDeps = {
   },
   selectMonitorDocument: selectOneDocForMonitor,
   handleConnection: (socket, request) => hocuspocusServer.handleConnection(socket, request),
+  revokeActiveAccess,
 }
 
 export function createCollaborationApp(deps: CollaborationRuntimeDeps = defaultRuntimeDeps): Koa {
   const app = new Koa()
+  const defaultBodyParser = bodyParser()
+  const accessRevocationBodyParser = bodyParser({
+    jsonLimit: '4kb',
+    formLimit: '4kb',
+    textLimit: '4kb',
+  })
 
   // Setup your koa instance using the koa-easy-ws extension
   app.use(websocket())
-  app.use(bodyParser())
+  app.use(async (ctx, next) => {
+    if (/^\/collab\/documents\/[^/]+\/access\/revoke$/.test(ctx.path)) {
+      await accessRevocationBodyParser(ctx, next)
+      return
+    }
+    await defaultBodyParser(ctx, next)
+  })
 
   const router = new Router()
-  const collabRouter = createCollabRouter()
+  const collabRouter = createCollabRouter({ revokeActiveAccess: deps.revokeActiveAccess })
   router.get('/', async (ctx) => {
     ctx.body = {
       service: 'doc-collaboration',

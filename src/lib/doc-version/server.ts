@@ -30,7 +30,33 @@ interface RestoreDocVersionInput {
 interface RestoreDocVersionDeps {
   callCollabRestore?: typeof callCollabRestore
   runTransaction?: typeof db.$transaction
+  updateDocTitle?: typeof updateDocTitle
 }
+
+export type RestoreDocVersionResult =
+  | {
+      status: 'completed'
+      docId: string
+      restoredVersionId: string
+      recoverySnapshotId: string
+      operationId: string
+      title: string
+      contentRestored: true
+      titleUpdated: true
+    }
+  | {
+      status: 'partial'
+      stage: 'title'
+      errorCode: 'TITLE_UPDATE_FAILED'
+      retryable: true
+      docId: string
+      restoredVersionId: string
+      recoverySnapshotId: string
+      operationId: string
+      title: string
+      contentRestored: true
+      titleUpdated: false
+    }
 
 // 读取指定文档最近一次生成的版本快照。
 export async function findLatestDocVersion(docId: string, userId: string) {
@@ -54,17 +80,21 @@ export async function createDocVersion(input: CreateDocVersionInput) {
   })
 }
 
-// 恢复正文成功后，在同一个事务里补写当前快照版本并同步标题。
-export async function restoreDocVersion(input: RestoreDocVersionInput, deps: RestoreDocVersionDeps = {}) {
+// 先保留当前快照，再恢复协同正文并同步标题。
+export async function restoreDocVersion(
+  input: RestoreDocVersionInput,
+  deps: RestoreDocVersionDeps = {}
+): Promise<RestoreDocVersionResult> {
   const { docId, userId, currentSnapshot, targetVersion } = input
   const restore = deps.callCollabRestore || callCollabRestore
   const runTransaction = deps.runTransaction || db.$transaction.bind(db)
+  const updateTitle = deps.updateDocTitle || updateDocTitle
   const targetBinaryBase64 = Buffer.from(targetVersion.contentBinary).toString('base64')
 
-  await restore(docId, targetBinaryBase64)
-
-  await runTransaction(async (tx) => {
-    await tx.docVersion.create({
+  // Persist the pre-restore state first. If the collaboration call fails or the process exits,
+  // users still have a recoverable snapshot of the content that was current when restore began.
+  const recoverySnapshot = await runTransaction(async (tx) => {
+    return tx.docVersion.create({
       data: {
         docId,
         userId,
@@ -72,18 +102,44 @@ export async function restoreDocVersion(input: RestoreDocVersionInput, deps: Res
         content: currentSnapshot.content,
         contentBinary: Buffer.from(currentSnapshot.contentBinaryBase64, 'base64'),
       },
-    })
-
-    await tx.doc.update({
-      where: { id: docId },
-      data: { title: targetVersion.title },
+      select: { id: true },
     })
   })
 
+  await restore(docId, targetBinaryBase64)
+  // Restoring one document to one immutable target version is state-idempotent. Keep this key
+  // stable across retries while returning the distinct recovery snapshot created by each attempt.
+  const operationId = `restore:${docId}:${targetVersion.id}`
+
+  try {
+    // Setting one deterministic title is idempotent. If this final projection fails, callers get
+    // the stable operation and recovery snapshot IDs needed to observe and safely retry.
+    await updateTitle(docId, targetVersion.title)
+  } catch {
+    return {
+      status: 'partial',
+      stage: 'title',
+      errorCode: 'TITLE_UPDATE_FAILED',
+      retryable: true,
+      docId,
+      restoredVersionId: targetVersion.id,
+      recoverySnapshotId: recoverySnapshot.id,
+      operationId,
+      title: targetVersion.title,
+      contentRestored: true,
+      titleUpdated: false,
+    }
+  }
+
   return {
+    status: 'completed',
     docId,
     restoredVersionId: targetVersion.id,
+    recoverySnapshotId: recoverySnapshot.id,
+    operationId,
     title: targetVersion.title,
+    contentRestored: true,
+    titleUpdated: true,
   }
 }
 
