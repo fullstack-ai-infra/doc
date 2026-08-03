@@ -15,6 +15,9 @@ All notable changes to `doc` are documented here.
   lifecycle, status, logs, development, and guarded local database commands.
 - Database-aware Web and collaboration health endpoints.
 - Full Docker Compose stack for PostgreSQL, schema application, collaboration, and Web.
+- Loopback-only Mailpit service and a zero-credential email sign-in path for local deployments.
+- Repeatable local-loop verification through Mailpit authentication and persisted document
+  create/update/read behavior.
 - Bearer-only `/api/v1` document endpoints for token inspection, listing, reading, canonical
   creation, and ETag-guarded metadata updates.
 - Remote `doc auth`, `doc ls`, `doc get`, `doc create`, and `doc update` commands with private
@@ -30,6 +33,12 @@ All notable changes to `doc` are documented here.
   authentication, mail, Next.js 14, collaboration, storage, and Markdown dependency lines.
 - Bound local Compose ports to loopback, removed fallback collaboration keys, isolated Compose
   projects per checkout, and made the collaboration image install from the root lockfile.
+- Parameterized every local host port, moved the default Web endpoint to port 3100, selected
+  authentication providers from complete configuration, and made diagnostics reject stacks with
+  no usable sign-in path.
+- Made local initialization merge missing safe defaults without replacing configuration, added
+  independent SMTP and Mailpit live probes, redacted optional authentication credentials from
+  diagnostic failures, and preserved external SMTP host/port fallback in Compose.
 - Hardened legacy document reads, duplication, sharing, publishing, and collaboration monitoring
   against cross-user access and soft-deleted document access.
 - Added scoped, expiring, and revocable personal access tokens with a session-protected bilingual
