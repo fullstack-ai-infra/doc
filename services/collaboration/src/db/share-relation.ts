@@ -1,4 +1,12 @@
-const { pgClient, reconnect } = require('./client')
+import type { QueryResultRow } from 'pg'
+
+import { pgClient, reconnect } from './client.js'
+
+export type DocumentAccess = 'ADMIN' | 'READ' | 'WRITE'
+
+interface AccessRow extends QueryResultRow {
+  access: DocumentAccess
+}
 
 /**
  * Get share relation
@@ -6,14 +14,14 @@ const { pgClient, reconnect } = require('./client')
  * @param {string} userId user id
  * @returns {string | null} 'ADMIN' | 'READ' | 'WRITE' | null
  */
-async function getShareRelationAccess(docId, userId) {
+export async function getShareRelationAccess(docId: string, userId: string): Promise<DocumentAccess | null> {
   try {
     // check if the doc is mine
     const getDocSQL = `select id from "Doc" where id = $1 and "userId" = $2 and "isDeleted" = false`
     const getDocValues = [docId, userId]
     const getDocResult = await pgClient.query(getDocSQL, getDocValues)
     // console.log('getDocResult...', getDocResult.rowCount)
-    if (getDocResult.rowCount > 0) {
+    if ((getDocResult.rowCount ?? 0) > 0) {
       return 'ADMIN'
     }
 
@@ -29,12 +37,13 @@ async function getShareRelationAccess(docId, userId) {
       limit 1
     `
     const getShareRelationValues = [docId, userId]
-    const getShareRelationResult = await pgClient.query(getShareRelationSQL, getShareRelationValues)
+    const getShareRelationResult = await pgClient.query<AccessRow>(getShareRelationSQL, getShareRelationValues)
     // console.log('getShareRelationResult...', getShareRelationResult.rows[0])
     return getShareRelationResult.rows[0]?.access || null
-  } catch (err) {
-    console.error('hocuspocus db getShareRelationAccess error', err)
-    reconnect()
+  } catch {
+    console.error('hocuspocus db getShareRelationAccess error')
+    void reconnect()
+    return null
   }
 }
 
@@ -43,7 +52,7 @@ async function getShareRelationAccess(docId, userId) {
  * @param {string} docId doc id
  * @param {string} userId user id
  */
-async function updateShareRelationNoticeType(docId, userId) {
+export async function updateShareRelationNoticeType(docId: string, userId: string): Promise<void> {
   const sql = `
     update "ShareRelation" relation
     set "noticeType" = 'UPDATE'
@@ -55,14 +64,9 @@ async function updateShareRelationNoticeType(docId, userId) {
   `
   const values = [docId, userId]
   try {
-    const res = await pgClient.query(sql, values)
-  } catch (err) {
-    console.error('hocuspocus db updateShareRelationNoticeType error', err)
-    reconnect()
+    await pgClient.query(sql, values)
+  } catch {
+    console.error('hocuspocus db updateShareRelationNoticeType error')
+    void reconnect()
   }
-}
-
-module.exports = {
-  getShareRelationAccess,
-  updateShareRelationNoticeType,
 }

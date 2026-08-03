@@ -2,12 +2,15 @@
   "name": "@fullstack-ai-infra/doc-collaboration",
   "version": "1.0.0",
   "description": "Realtime collaboration service for doc.",
-  "main": "index.js",
+  "type": "module",
+  "main": "dist/index.js",
   "scripts": {
-    "start": "node src/index.js",
-    "dev": "nodemon src/index.js",
-    "check": "node --check src/index.js && node --check src/hocuspocus/index.js && node --check src/http/collab-routes.js",
-    "prod": "node src/index.js"
+    "build": "tsc --project tsconfig.json",
+    "typecheck": "tsc --project tsconfig.json --noEmit && tsc --project tsconfig.test.json",
+    "start": "node dist/index.js",
+    "dev": "nodemon --watch src --ext ts --exec \"npm run build && node dist/index.js\"",
+    "check": "npm run typecheck && npm run build",
+    "prod": "node dist/index.js"
   },
   "keywords": [],
   "author": "",
@@ -37,6 +40,9 @@
     "yjs": "^13.6.18"
   },
   "devDependencies": {
-    "nodemon": "^3.1.4"
+    "@types/koa": "^2.15.2",
+    "@types/koa-bodyparser": "^4.3.13",
+    "@types/pg": "^8.20.3",
+    "nodemon": "^3.1.14"
   }
 }

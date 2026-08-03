@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 
-const { hasValidInternalKey } = require('../../../services/collaboration/src/http/collab-routes')
+import { hasValidInternalKey } from '../../../services/collaboration/src/http/collab-routes'
 
 const originalInternalKey = process.env.INTERNAL_API_KEY
 

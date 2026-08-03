@@ -18,6 +18,7 @@ This document describes the current implementation, not an aspirational API.
 
 - Koa HTTP/WebSocket server
 - Hocuspocus and Yjs document rooms
+- Strict TypeScript source compiled to native Node.js ESM for local and container production starts
 - Shared PostgreSQL document state
 - Encrypted short-lived user tokens for WebSocket authentication
 - Separate internal key for restore and monitor operations
