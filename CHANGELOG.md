@@ -22,6 +22,8 @@ All notable changes to `doc` are documented here.
   creation, and ETag-guarded metadata updates.
 - Remote `doc auth`, `doc ls`, `doc get`, `doc create`, and `doc update` commands with private
   credential storage, bounded requests, machine-readable output, and no checkout requirement.
+- Continuous integration `docker-build` job that validates the Compose configuration and builds
+  every image from a clean checkout, so a broken container build can no longer reach `main`.
 
 ### Changed
 
