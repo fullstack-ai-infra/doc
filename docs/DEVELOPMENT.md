@@ -31,6 +31,20 @@ Before requesting review:
 npm run check
 ```
 
+The commands above run on the host and never build the container images, so a Dockerfile that is
+missing a build-time dependency still passes them. CI runs a separate `docker-build` job for that.
+Reproduce it locally with:
+
+```bash
+AUTH_SECRET=ci-only-secret \
+COLLABORATE_API_AUTH_KEY=ci-collaboration-token \
+COLLABORATE_INTERNAL_API_KEY=ci-internal-token \
+  docker compose --env-file /dev/null build
+```
+
+`--env-file /dev/null` keeps the run equivalent to a clean checkout so a local `.env` cannot be the
+reason the build succeeds.
+
 ## Data and migrations
 
 Change `prisma/schema.prisma` intentionally and document any compatibility impact. Use

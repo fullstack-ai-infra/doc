@@ -36,3 +36,20 @@ jobs:
       - run: npm run build:collaboration
       - run: npm run check:cli
       - run: npm run build
+
+  docker-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      AUTH_SECRET: ci-only-secret
+      COLLABORATE_API_AUTH_KEY: ci-collaboration-token
+      COLLABORATE_INTERNAL_API_KEY: ci-internal-token
+
+    steps:
+      - uses: actions/checkout@v4
+      # --env-file /dev/null keeps this identical to a clean checkout: a local
+      # .env must never be what makes the image build succeed.
+      - name: Validate Compose configuration
+        run: docker compose --env-file /dev/null config --quiet
+      - name: Build container images
+        run: docker compose --env-file /dev/null build
