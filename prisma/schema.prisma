@@ -201,3 +201,22 @@ model PubDoc {
   doc             Doc          @relation(fields: [docId], references: [id], onDelete: Cascade)
   thumbUpCount    Int          @default(0)
 }
+
+model AuditLog {
+  id             String   @id @default(cuid())
+  actor          String
+  actorType      String   @default("user") @db.VarChar(20)
+  action         String   @db.VarChar(80)
+  target         String
+  targetType     String?  @db.VarChar(40)
+  outcome        String   @db.VarChar(20)
+  requestId      String?  @db.VarChar(128)
+  idempotencyKey String?  @db.VarChar(128)
+  metadata       Json?
+  createdAt      DateTime @default(now())
+
+  @@index([target, createdAt(sort: Desc)])
+  @@index([actor, createdAt(sort: Desc)])
+  @@index([action, createdAt(sort: Desc)])
+  @@index([createdAt(sort: Desc)])
+}
