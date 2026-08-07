@@ -217,5 +217,11 @@ export function createApiClient({
         ifMatch: options.force ? '*' : options.ifMatch,
       })
     },
+    exportBundle() {
+      return request(`${DOCUMENTS_PATH}/export`)
+    },
+    importBundle(bundle) {
+      return request(`${DOCUMENTS_PATH}/import`, { method: 'POST', body: bundle })
+    },
   }
 }
