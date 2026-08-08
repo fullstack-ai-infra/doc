@@ -16,12 +16,7 @@ import { z } from 'zod'
 
 // --- State Machine ---
 
-export type ProposalStatus =
-  | 'pending_review'
-  | 'approved'
-  | 'denied'
-  | 'expired'
-  | 'committed'
+export type ProposalStatus = 'pending_review' | 'approved' | 'denied' | 'expired' | 'committed'
 
 const TERMINAL_STATES: readonly ProposalStatus[] = ['denied', 'expired', 'committed']
 
@@ -99,9 +94,14 @@ export interface ProposalStore {
   findByIdempotencyKey(proposerId: string, key: string): Promise<Proposal | null>
   updateStatus(
     id: string,
-    update: Partial<Pick<Proposal, 'status' | 'reviewerId' | 'reviewComment' | 'reviewedAt' | 'committedAt' | 'commitOperationId'>>
+    update: Partial<
+      Pick<Proposal, 'status' | 'reviewerId' | 'reviewComment' | 'reviewedAt' | 'committedAt' | 'commitOperationId'>
+    >
   ): Promise<Proposal>
-  listByDocument(documentId: string, options?: { status?: ProposalStatus; limit?: number; offset?: number }): Promise<Proposal[]>
+  listByDocument(
+    documentId: string,
+    options?: { status?: ProposalStatus; limit?: number; offset?: number }
+  ): Promise<Proposal[]>
 }
 
 // --- In-memory store for testing / single-node ---
@@ -128,7 +128,9 @@ export class InMemoryProposalStore implements ProposalStore {
 
   async updateStatus(
     id: string,
-    update: Partial<Pick<Proposal, 'status' | 'reviewerId' | 'reviewComment' | 'reviewedAt' | 'committedAt' | 'commitOperationId'>>
+    update: Partial<
+      Pick<Proposal, 'status' | 'reviewerId' | 'reviewComment' | 'reviewedAt' | 'committedAt' | 'commitOperationId'>
+    >
   ): Promise<Proposal> {
     const existing = this.proposals.get(id)
     if (!existing) throw new Error(`Proposal ${id} not found`)
@@ -190,10 +192,7 @@ export class ProposalService {
     ) => Promise<{ versionId: string }>
   ) {}
 
-  async createProposal(
-    proposerId: string,
-    input: z.infer<typeof createProposalSchema>
-  ): Promise<CreateProposalResult> {
+  async createProposal(proposerId: string, input: z.infer<typeof createProposalSchema>): Promise<CreateProposalResult> {
     // Idempotency check
     if (input.idempotencyKey) {
       const existing = await this.store.findByIdempotencyKey(proposerId, input.idempotencyKey)
@@ -351,10 +350,7 @@ export class ProposalService {
     }
   }
 
-  async commitProposal(
-    actorId: string,
-    proposalId: string
-  ): Promise<CommitResult> {
+  async commitProposal(actorId: string, proposalId: string): Promise<CommitResult> {
     const proposal = await this.store.findById(proposalId)
     if (!proposal) {
       throw new ApiV1Error(404, 'proposal_not_found', 'Proposal does not exist')

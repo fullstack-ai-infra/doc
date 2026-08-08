@@ -47,11 +47,7 @@ export const DEFAULT_COLLABORATION_LIMITS: CollaborationLimits = {
 /**
  * Validate that a request body does not exceed the configured limit.
  */
-export function assertBodySize(
-  contentLength: number | null,
-  limit: number,
-  label = 'Request body'
-): void {
+export function assertBodySize(contentLength: number | null, limit: number, label = 'Request body'): void {
   if (contentLength !== null && contentLength > limit) {
     throw new RequestLimitError(`${label} exceeds maximum size of ${limit} bytes`)
   }
@@ -65,9 +61,7 @@ export function assertWsMessageSize(
   limits: CollaborationLimits = DEFAULT_COLLABORATION_LIMITS
 ): void {
   if (messageBytes > limits.maxYjsUpdateBytes) {
-    throw new RequestLimitError(
-      `WebSocket message exceeds maximum size of ${limits.maxYjsUpdateBytes} bytes`
-    )
+    throw new RequestLimitError(`WebSocket message exceeds maximum size of ${limits.maxYjsUpdateBytes} bytes`)
   }
 }
 

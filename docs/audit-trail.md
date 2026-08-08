@@ -7,27 +7,27 @@ Events are never deleted or modified through application APIs.
 
 ## Recorded Events
 
-| Action | Description |
-|--------|-------------|
-| document.create | New document created |
-| document.delete | Document moved to trash |
-| document.metadata_update | Title, icon, or star status changed |
-| document.content_mutate | Content changed via API mutation |
-| permission.grant | Share access granted |
-| permission.change | Share access level changed |
-| permission.revoke | Share access revoked |
-| version.create | Version snapshot saved |
-| version.restore | Document restored to previous version |
-| publish.publish | Document published |
-| publish.unpublish | Document unpublished |
-| proposal.create | Agent proposal submitted |
-| proposal.approve | Proposal approved |
-| proposal.deny | Proposal denied |
-| proposal.commit | Proposal committed to document |
-| bundle.export | Document bundle exported |
-| bundle.import | Document bundle imported |
-| token.create | Personal access token created |
-| token.revoke | Personal access token revoked |
+| Action                   | Description                           |
+| ------------------------ | ------------------------------------- |
+| document.create          | New document created                  |
+| document.delete          | Document moved to trash               |
+| document.metadata_update | Title, icon, or star status changed   |
+| document.content_mutate  | Content changed via API mutation      |
+| permission.grant         | Share access granted                  |
+| permission.change        | Share access level changed            |
+| permission.revoke        | Share access revoked                  |
+| version.create           | Version snapshot saved                |
+| version.restore          | Document restored to previous version |
+| publish.publish          | Document published                    |
+| publish.unpublish        | Document unpublished                  |
+| proposal.create          | Agent proposal submitted              |
+| proposal.approve         | Proposal approved                     |
+| proposal.deny            | Proposal denied                       |
+| proposal.commit          | Proposal committed to document        |
+| bundle.export            | Document bundle exported              |
+| bundle.import            | Document bundle imported              |
+| token.create             | Personal access token created         |
+| token.revoke             | Personal access token revoked         |
 
 ## Event Schema
 
@@ -47,6 +47,7 @@ Each audit record includes:
 ## Redaction Policy
 
 The following are **never** stored in audit metadata:
+
 - Document content/body
 - Credentials, tokens, or secrets
 - Binary data
@@ -64,6 +65,7 @@ The following are **never** stored in audit metadata:
 `GET /api/v1/audit` — requires `documents:read` scope.
 
 Query parameters:
+
 - `target` — filter by target resource ID
 - `actor` — filter by actor ID
 - `action` — filter by action type

@@ -1,7 +1,21 @@
 import { createHash } from 'node:crypto'
+import { types } from 'node:util'
 
 import type { StorageProvider, StorageObject, PutOptions, GetResult, StorageLimits } from './interface'
 import { validateStorageKey, validateUpload, DEFAULT_STORAGE_LIMITS, StorageValidationError } from './interface'
+
+const NativeUint8Array = Uint8Array
+const isUint8Array = types.isUint8Array
+const applyIntrinsic = Reflect.apply
+const typedArrayPrototype = Reflect.getPrototypeOf(NativeUint8Array.prototype)
+if (typedArrayPrototype === null) throw new Error('TypedArray prototype is unavailable')
+
+const byteLengthDescriptor = Reflect.getOwnPropertyDescriptor(typedArrayPrototype, 'byteLength')
+if (byteLengthDescriptor?.get === undefined) throw new Error('TypedArray byteLength getter is unavailable')
+
+const getTypedArrayByteLength: (this: Uint8Array<ArrayBufferLike>) => number = byteLengthDescriptor.get
+const readTypedArrayByteLength: (value: Uint8Array<ArrayBufferLike>) => number = (value) =>
+  applyIntrinsic(getTypedArrayByteLength, value, [])
 
 export interface S3CompatibleStorageOptions {
   endpoint: string
@@ -13,6 +27,17 @@ export interface S3CompatibleStorageOptions {
   limits?: StorageLimits
   /** Custom fetch for testing */
   fetchFn?: typeof fetch
+}
+
+function trustedByteLength(value: Uint8Array<ArrayBufferLike>): number {
+  if (!isUint8Array(value)) {
+    throw new StorageValidationError('invalid_upload_body', 'Upload body must be a genuine Uint8Array')
+  }
+  try {
+    return readTypedArrayByteLength(value)
+  } catch {
+    throw new StorageValidationError('invalid_upload_body', 'Upload body must have genuine TypedArray internal slots')
+  }
 }
 
 /**
@@ -66,27 +91,36 @@ export class S3CompatibleStorage implements StorageProvider {
 
   async put(key: string, body: Buffer, options: PutOptions): Promise<StorageObject> {
     validateStorageKey(key, this.namespace)
-    validateUpload(body.length, options.contentType, this.limits)
+    const trustedLength = trustedByteLength(body)
+    const contentType = options.contentType
+    validateUpload(trustedLength, contentType, this.limits)
+
+    const requestBody = new NativeUint8Array(body)
+    const snapshotLength = trustedByteLength(requestBody)
+    if (snapshotLength !== trustedLength) {
+      throw new StorageValidationError('upload_size_changed', 'Upload body size changed before snapshot')
+    }
 
     const url = this.objectUrl(key)
-    const headers = this.authHeaders('PUT', key, options.contentType)
+    const headers = this.authHeaders('PUT', key, contentType)
+    const fallbackEtag = createHash('md5').update(requestBody).digest('hex')
 
     const response = await this.fetchFn(url, {
       method: 'PUT',
-      headers: { ...headers, 'Content-Length': String(body.length) },
-      body,
+      headers: { ...headers, 'Content-Length': String(snapshotLength) },
+      body: requestBody,
     })
 
     if (!response.ok) {
       throw new StorageValidationError('upload_failed', `S3 upload failed: ${response.status}`)
     }
 
-    const etag = response.headers.get('ETag') || createHash('md5').update(body).digest('hex')
+    const etag = response.headers.get('ETag') || fallbackEtag
 
     return {
       key,
-      size: body.length,
-      contentType: options.contentType,
+      size: snapshotLength,
+      contentType,
       etag,
       lastModified: new Date(),
     }
