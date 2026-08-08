@@ -15,6 +15,18 @@ export interface S3CompatibleStorageOptions {
   fetchFn?: typeof fetch
 }
 
+function isArrayBuffer(backing: ArrayBufferLike): backing is ArrayBuffer {
+  return Object.prototype.toString.call(backing) === '[object ArrayBuffer]'
+}
+
+function toFetchBody(body: Buffer): Uint8Array<ArrayBuffer> {
+  const backing = body.buffer
+  if (isArrayBuffer(backing)) {
+    return new Uint8Array(backing, body.byteOffset, body.byteLength)
+  }
+  return Uint8Array.from(body)
+}
+
 /**
  * S3-compatible storage provider.
  * Works with AWS S3, MinIO, Cloudflare R2, DigitalOcean Spaces, etc.
@@ -70,11 +82,12 @@ export class S3CompatibleStorage implements StorageProvider {
 
     const url = this.objectUrl(key)
     const headers = this.authHeaders('PUT', key, options.contentType)
+    const requestBody = toFetchBody(body)
 
     const response = await this.fetchFn(url, {
       method: 'PUT',
       headers: { ...headers, 'Content-Length': String(body.length) },
-      body,
+      body: requestBody,
     })
 
     if (!response.ok) {

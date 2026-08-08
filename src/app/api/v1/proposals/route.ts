@@ -27,10 +27,7 @@ export async function GET(request: Request) {
     const url = new URL(request.url)
     const documentId = url.searchParams.get('documentId')
     if (!documentId) {
-      return apiError(
-        { status: 400, code: 'missing_parameter', message: 'documentId is required' },
-        requestId
-      )
+      return apiError({ status: 400, code: 'missing_parameter', message: 'documentId is required' }, requestId)
     }
     const status = url.searchParams.get('status') as any
     const limit = Math.min(Number(url.searchParams.get('limit') || '50'), 100)

@@ -1,7 +1,18 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 
+const mockDb = vi.hoisted(() => ({
+  doc: {
+    findFirst: vi.fn(),
+    findFirstOrThrow: vi.fn(),
+    update: vi.fn(),
+  },
+  docVersion: {
+    create: vi.fn(),
+  },
+}))
+
 vi.mock('server-only', () => ({}))
-vi.mock('@/db/db', () => ({ db: {} }))
+vi.mock('@/db/db', () => ({ db: mockDb }))
 
 import {
   ProposalService,
@@ -9,6 +20,7 @@ import {
   type DocumentPermissionCheck,
   type ProposalAuditRecorder,
 } from '@/lib/api-v1-proposals'
+import { getProposalService } from '@/lib/api-v1-proposals-instance'
 
 function createMocks() {
   const store = new InMemoryProposalStore()
@@ -39,6 +51,37 @@ const VALID_INPUT = {
   evidenceLocators: ['https://issue-tracker/123'],
   expiresInSeconds: 3600,
 }
+
+beforeEach(() => {
+  vi.clearAllMocks()
+})
+
+describe('proposal persistence adapter', () => {
+  it('persists matching canonical JSON and binary state for committed content', async () => {
+    const updatedAt = new Date('2026-08-01T00:00:00.000Z')
+    mockDb.doc.findFirst.mockResolvedValue({ id: 'doc-instance', updatedAt })
+    mockDb.doc.findFirstOrThrow.mockResolvedValue({ userId: 'agent-1' })
+    mockDb.docVersion.create.mockResolvedValue({ id: 'ver-instance' })
+    mockDb.doc.update.mockResolvedValue({})
+
+    const service = getProposalService()
+    const input = {
+      ...VALID_INPUT,
+      documentId: 'doc-instance',
+      idempotencyKey: 'persist-content-binary',
+    }
+    const { proposalId } = await service.createProposal('agent-1', input)
+    await service.reviewProposal('reviewer-1', proposalId, { decision: 'approve' })
+    await service.commitProposal('agent-1', proposalId)
+
+    const versionData = mockDb.docVersion.create.mock.calls[0][0].data
+    const documentData = mockDb.doc.update.mock.calls[0][0].data
+    expect(versionData.content).toBe(documentData.content)
+    expect(versionData.contentBinary).toEqual(documentData.contentBinary)
+    expect(Buffer.isBuffer(versionData.contentBinary)).toBe(true)
+    expect(versionData.contentBinary.byteLength).toBeGreaterThan(0)
+  })
+})
 
 describe('ProposalService', () => {
   describe('createProposal', () => {
@@ -121,18 +164,20 @@ describe('ProposalService', () => {
       const { service } = createMocks()
       const { proposalId } = await service.createProposal('agent-1', VALID_INPUT)
       await service.reviewProposal('reviewer-1', proposalId, { decision: 'approve' })
-      await expect(
-        service.reviewProposal('reviewer-1', proposalId, { decision: 'deny' })
-      ).rejects.toMatchObject({ status: 409, code: 'invalid_proposal_state' })
+      await expect(service.reviewProposal('reviewer-1', proposalId, { decision: 'deny' })).rejects.toMatchObject({
+        status: 409,
+        code: 'invalid_proposal_state',
+      })
     })
 
     it('rejects review when permission denied', async () => {
       const { service, permissions } = createMocks()
       const { proposalId } = await service.createProposal('agent-1', VALID_INPUT)
       vi.mocked(permissions.canReview).mockResolvedValue(false)
-      await expect(
-        service.reviewProposal('stranger', proposalId, { decision: 'approve' })
-      ).rejects.toMatchObject({ status: 403, code: 'permission_denied' })
+      await expect(service.reviewProposal('stranger', proposalId, { decision: 'approve' })).rejects.toMatchObject({
+        status: 403,
+        code: 'permission_denied',
+      })
     })
 
     it('rejects review of expired proposal', async () => {
@@ -141,9 +186,10 @@ describe('ProposalService', () => {
       const { proposalId } = await service.createProposal('agent-1', input)
       // Wait for expiration
       await new Promise((resolve) => setTimeout(resolve, 1100))
-      await expect(
-        service.reviewProposal('reviewer-1', proposalId, { decision: 'approve' })
-      ).rejects.toMatchObject({ status: 410, code: 'proposal_expired' })
+      await expect(service.reviewProposal('reviewer-1', proposalId, { decision: 'approve' })).rejects.toMatchObject({
+        status: 410,
+        code: 'proposal_expired',
+      })
     })
   })
 
@@ -226,9 +272,7 @@ describe('ProposalService', () => {
       await service.reviewProposal('reviewer-1', proposalId, { decision: 'approve' })
       await service.commitProposal('agent-1', proposalId)
       const calls = vi.mocked(audit.record).mock.calls
-      const correlationIds = calls
-        .map((call) => call[0].correlationId)
-        .filter((id) => id === proposalId)
+      const correlationIds = calls.map((call) => call[0].correlationId).filter((id) => id === proposalId)
       // create, approve, commit all share the same correlationId
       expect(correlationIds.length).toBeGreaterThanOrEqual(3)
     })

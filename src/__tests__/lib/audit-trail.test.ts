@@ -155,10 +155,7 @@ describe('audit-trail', () => {
 
       const findCall = (mockDb.auditLog.findMany as any).mock.calls[0][0]
       expect(findCall.where.OR).toBeDefined()
-      expect(findCall.where.OR).toEqual([
-        { actor: 'user-1' },
-        { target: { startsWith: 'user-1' } },
-      ])
+      expect(findCall.where.OR).toEqual([{ actor: 'user-1' }, { target: { startsWith: 'user-1' } }])
     })
 
     it('returns pagination cursor when more results exist', async () => {

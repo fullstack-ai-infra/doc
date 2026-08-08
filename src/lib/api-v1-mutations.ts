@@ -48,10 +48,7 @@ export interface MutationDeps {
 // --- Helpers ---
 
 function computeDocEtag(docId: string, updatedAt: Date): string {
-  const revision = createHash('sha256')
-    .update(`${docId}:${updatedAt.toISOString()}`)
-    .digest('base64url')
-    .slice(0, 24)
+  const revision = createHash('sha256').update(`${docId}:${updatedAt.toISOString()}`).digest('base64url').slice(0, 24)
   return `"doc:${docId}:${revision}"`
 }
 
@@ -133,9 +130,7 @@ export async function mutateDocumentContent(
   input: { content: Record<string, unknown>; baseVersion: string; idempotencyKey?: string },
   deps: MutationDeps = {}
 ): Promise<MutationResult> {
-  const idempotencyKey = input.idempotencyKey
-    ? `mutate:${userId}:${docId}:${input.idempotencyKey}`
-    : null
+  const idempotencyKey = input.idempotencyKey ? `mutate:${userId}:${docId}:${input.idempotencyKey}` : null
 
   if (idempotencyKey) {
     const existing = getIdempotentResult(idempotencyKey)
@@ -233,9 +228,7 @@ export async function restoreDocumentVersion(
   input: { versionId: string; idempotencyKey?: string },
   deps: MutationDeps = {}
 ): Promise<RestoreResult> {
-  const idempotencyKey = input.idempotencyKey
-    ? `restore:${userId}:${docId}:${input.idempotencyKey}`
-    : null
+  const idempotencyKey = input.idempotencyKey ? `restore:${userId}:${docId}:${input.idempotencyKey}` : null
 
   if (idempotencyKey) {
     const existing = getIdempotentResult(idempotencyKey)

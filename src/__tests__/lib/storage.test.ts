@@ -1,4 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach } from 'vitest'
+import { createHash } from 'node:crypto'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -106,9 +107,9 @@ describe('FilesystemStorage', () => {
   })
 
   it('rejects path traversal in put', async () => {
-    await expect(
-      storage.put('files/../escape.txt', Buffer.from('bad'), { contentType: 'text/plain' })
-    ).rejects.toThrow(StorageValidationError)
+    await expect(storage.put('files/../escape.txt', Buffer.from('bad'), { contentType: 'text/plain' })).rejects.toThrow(
+      StorageValidationError
+    )
   })
 
   it('rejects oversized uploads', async () => {
@@ -141,9 +142,9 @@ describe('S3CompatibleStorage', () => {
       fetchFn: mockFetch as any,
     })
 
-    await expect(
-      storage.put('files/../escape', Buffer.from('bad'), { contentType: 'text/plain' })
-    ).rejects.toThrow(StorageValidationError)
+    await expect(storage.put('files/../escape', Buffer.from('bad'), { contentType: 'text/plain' })).rejects.toThrow(
+      StorageValidationError
+    )
   })
 
   it('rejects namespace escape', async () => {
@@ -158,9 +159,9 @@ describe('S3CompatibleStorage', () => {
       fetchFn: mockFetch as any,
     })
 
-    await expect(
-      storage.put('other/path', Buffer.from('bad'), { contentType: 'text/plain' })
-    ).rejects.toThrow(StorageValidationError)
+    await expect(storage.put('other/path', Buffer.from('bad'), { contentType: 'text/plain' })).rejects.toThrow(
+      StorageValidationError
+    )
   })
 
   it('calls fetch with correct URL on put', async () => {
@@ -184,6 +185,139 @@ describe('S3CompatibleStorage', () => {
     expect(calls[0].method).toBe('PUT')
     expect(calls[0].url).toContain('mybucket')
     expect(calls[0].url).toContain('files%2Ftest.png')
+  })
+
+  it('preserves a sliced non-text ArrayBuffer upload and request metadata', async () => {
+    const backing = new ArrayBuffer(7)
+    new Uint8Array(backing).set([0xaa, 0x00, 0xff, 0x80, 0x41, 0x00, 0xbb])
+    const body = Buffer.from(backing, 1, 5)
+    let requestBody: Uint8Array | undefined
+    let requestHeaders: Headers | undefined
+    const mockFetch: typeof fetch = async (_input, init) => {
+      if (!(init?.body instanceof Uint8Array)) throw new Error('expected a Uint8Array request body')
+      requestBody = init.body
+      requestHeaders = new Headers(init.headers)
+      return new Response('', { status: 200 })
+    }
+    const storage = new S3CompatibleStorage({
+      endpoint: 'https://s3.example.com',
+      bucket: 'mybucket',
+      region: 'us-east-1',
+      accessKeyId: 'key',
+      secretAccessKey: 'secret',
+      namespace: 'files/',
+      fetchFn: mockFetch,
+    })
+
+    const result = await storage.put('files/non-text.bin', body, { contentType: 'application/pdf' })
+
+    if (requestBody === undefined || requestHeaders === undefined) throw new Error('upload was not captured')
+    expect(requestBody.buffer).toBe(backing)
+    expect(requestBody.byteOffset).toBe(body.byteOffset)
+    expect(requestBody.byteLength).toBe(body.byteLength)
+    expect(Array.from(requestBody)).toEqual(Array.from(body))
+    expect(requestHeaders.get('Content-Length')).toBe('5')
+    expect(requestHeaders.get('Content-Type')).toBe('application/pdf')
+
+    const date = requestHeaders.get('Date')
+    if (date === null) throw new Error('Date authorization input is missing')
+    const stringToSign = `PUT\n\napplication/pdf\n${date}\n/mybucket/files/non-text.bin`
+    const expectedSignature = createHash('sha256').update(`secret${stringToSign}`).digest('base64')
+    expect(requestHeaders.get('Authorization')).toBe(`AWS key:${expectedSignature}`)
+    expect(result.etag).toBe(createHash('md5').update(body).digest('hex'))
+  })
+
+  it('keeps a bounded zero-copy view for a pooled Buffer subarray', async () => {
+    const pooled = Buffer.from([0xaa, 0x00, 0xff, 0x80, 0x41, 0x00, 0xbb])
+    const body = pooled.subarray(1, 6)
+    let requestBody: Uint8Array | undefined
+    const mockFetch: typeof fetch = async (_input, init) => {
+      if (!(init?.body instanceof Uint8Array)) throw new Error('expected a Uint8Array request body')
+      requestBody = init.body
+      return new Response('', { status: 200 })
+    }
+    const storage = new S3CompatibleStorage({
+      endpoint: 'https://s3.example.com',
+      bucket: 'mybucket',
+      region: 'us-east-1',
+      accessKeyId: 'key',
+      secretAccessKey: 'secret',
+      namespace: 'files/',
+      fetchFn: mockFetch,
+    })
+
+    await storage.put('files/pooled.bin', body, { contentType: 'application/pdf' })
+
+    if (requestBody === undefined) throw new Error('upload was not captured')
+    expect(requestBody.buffer).toBe(body.buffer)
+    expect(requestBody.byteOffset).toBe(body.byteOffset)
+    expect(requestBody.byteLength).toBe(body.byteLength)
+    expect(Array.from(requestBody)).toEqual(Array.from(body))
+  })
+
+  it('copies only the selected bytes from a SharedArrayBuffer upload', async () => {
+    const backing = new SharedArrayBuffer(7)
+    new Uint8Array(backing).set([0xaa, 0x01, 0x00, 0xff, 0x80, 0x02, 0xbb])
+    const body = Buffer.from(backing, 1, 5)
+    let requestBody: Uint8Array | undefined
+    let requestHeaders: Headers | undefined
+    const mockFetch: typeof fetch = async (_input, init) => {
+      if (!(init?.body instanceof Uint8Array)) throw new Error('expected a Uint8Array request body')
+      requestBody = init.body
+      requestHeaders = new Headers(init.headers)
+      return new Response('', { status: 200, headers: { ETag: 'shared-etag' } })
+    }
+    const storage = new S3CompatibleStorage({
+      endpoint: 'https://s3.example.com',
+      bucket: 'mybucket',
+      region: 'us-east-1',
+      accessKeyId: 'key',
+      secretAccessKey: 'secret',
+      namespace: 'files/',
+      fetchFn: mockFetch,
+    })
+
+    const result = await storage.put('files/shared.bin', body, { contentType: 'application/pdf' })
+
+    if (requestBody === undefined || requestHeaders === undefined) throw new Error('upload was not captured')
+    expect(requestBody.buffer).toBeInstanceOf(ArrayBuffer)
+    expect(requestBody.buffer).not.toBe(backing)
+    expect(requestBody.byteOffset).toBe(0)
+    expect(requestBody.byteLength).toBe(body.byteLength)
+    expect(Array.from(requestBody)).toEqual(Array.from(body))
+    expect(requestHeaders.get('Content-Length')).toBe('5')
+    expect(requestHeaders.get('Content-Type')).toBe('application/pdf')
+    expect(result.etag).toBe('shared-etag')
+  })
+
+  it('preserves an empty upload without exposing unrelated backing bytes', async () => {
+    const body = Buffer.alloc(0)
+    let requestBody: Uint8Array | undefined
+    let requestHeaders: Headers | undefined
+    const mockFetch: typeof fetch = async (_input, init) => {
+      if (!(init?.body instanceof Uint8Array)) throw new Error('expected a Uint8Array request body')
+      requestBody = init.body
+      requestHeaders = new Headers(init.headers)
+      return new Response('', { status: 200 })
+    }
+    const storage = new S3CompatibleStorage({
+      endpoint: 'https://s3.example.com',
+      bucket: 'mybucket',
+      region: 'us-east-1',
+      accessKeyId: 'key',
+      secretAccessKey: 'secret',
+      namespace: 'files/',
+      fetchFn: mockFetch,
+    })
+
+    const result = await storage.put('files/empty.bin', body, { contentType: 'application/pdf' })
+
+    if (requestBody === undefined || requestHeaders === undefined) throw new Error('upload was not captured')
+    expect(requestBody.byteLength).toBe(0)
+    expect(Array.from(requestBody)).toEqual([])
+    expect(requestHeaders.get('Content-Length')).toBe('0')
+    expect(requestHeaders.get('Content-Type')).toBe('application/pdf')
+    expect(result.etag).toBe(createHash('md5').update(body).digest('hex'))
   })
 
   it('handles 404 on get as not_found', async () => {

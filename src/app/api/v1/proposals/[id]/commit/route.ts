@@ -5,10 +5,7 @@ import { getProposalService } from '@/lib/api-v1-proposals-instance'
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
-export async function POST(
-  request: Request,
-  { params }: { params: { id: string } }
-) {
+export async function POST(request: Request, { params }: { params: { id: string } }) {
   const requestId = apiRequestId(request)
   try {
     const principal = await authenticatePersonalAccessToken(request, 'documents:write')

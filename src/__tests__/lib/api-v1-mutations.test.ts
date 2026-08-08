@@ -62,9 +62,7 @@ describe('api-v1-mutations', () => {
     })
 
     it('rejects empty baseVersion', () => {
-      expect(() =>
-        parseMutateContent({ content: { type: 'doc' }, baseVersion: '' })
-      ).toThrow()
+      expect(() => parseMutateContent({ content: { type: 'doc' }, baseVersion: '' })).toThrow()
     })
 
     it('accepts optional idempotencyKey', () => {
@@ -194,9 +192,7 @@ describe('api-v1-mutations', () => {
     it('rejects when document not found', async () => {
       mockDb.doc.findFirst.mockResolvedValue(null)
 
-      await expect(
-        listDocumentVersions('user-1', 'doc-1', new URLSearchParams())
-      ).rejects.toThrow('Document not found')
+      await expect(listDocumentVersions('user-1', 'doc-1', new URLSearchParams())).rejects.toThrow('Document not found')
     })
   })
 
@@ -237,9 +233,9 @@ describe('api-v1-mutations', () => {
       mockDb.doc.findFirst.mockResolvedValue({ id: 'doc-1' } as any)
       mockDb.docVersion.findFirst.mockResolvedValue(null)
 
-      await expect(
-        restoreDocumentVersion('user-1', 'doc-1', { versionId: 'missing' })
-      ).rejects.toThrow('Version not found')
+      await expect(restoreDocumentVersion('user-1', 'doc-1', { versionId: 'missing' })).rejects.toThrow(
+        'Version not found'
+      )
     })
 
     it('idempotent restore does not create duplicate snapshots', async () => {

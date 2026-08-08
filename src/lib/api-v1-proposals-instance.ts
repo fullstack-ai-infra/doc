@@ -7,6 +7,7 @@ import {
   type DocumentPermissionCheck,
   type ProposalAuditRecorder,
 } from '@/lib/api-v1-proposals'
+import { encodeTiptapDocument } from '@/lib/tiptap-codec'
 
 /**
  * Singleton instance of the proposal service.
@@ -59,19 +60,23 @@ async function executeMutation(
 ): Promise<{ versionId: string }> {
   // Will integrate with active-room mutation from issue #4 once merged.
   // For now, a direct database write for testing purposes.
-  const contentJson = JSON.stringify(content)
+  const encoded = encodeTiptapDocument(content)
   const version = await db.docVersion.create({
     data: {
       docId: documentId,
       userId: (await db.doc.findFirstOrThrow({ where: { id: documentId }, select: { userId: true } })).userId,
       title: 'Proposal commit',
-      content: contentJson,
+      content: encoded.contentJson,
+      contentBinary: encoded.contentBinary,
     },
     select: { id: true },
   })
   await db.doc.update({
     where: { id: documentId },
-    data: { content: contentJson },
+    data: {
+      content: encoded.contentJson,
+      contentBinary: encoded.contentBinary,
+    },
   })
   return { versionId: version.id }
 }

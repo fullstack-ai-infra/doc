@@ -7,10 +7,10 @@
 The `StorageProvider` interface (`src/lib/storage/interface.ts`) defines a
 provider-neutral contract for binary/object storage. Two implementations ship:
 
-| Provider | Use Case | Config |
-|----------|----------|--------|
-| `FilesystemStorage` | Development, single-node | `STORAGE_PROVIDER=filesystem` |
-| `S3CompatibleStorage` | Production, multi-node | `STORAGE_PROVIDER=s3` |
+| Provider              | Use Case                 | Config                        |
+| --------------------- | ------------------------ | ----------------------------- |
+| `FilesystemStorage`   | Development, single-node | `STORAGE_PROVIDER=filesystem` |
+| `S3CompatibleStorage` | Production, multi-node   | `STORAGE_PROVIDER=s3`         |
 
 The S3 implementation works with AWS S3, MinIO, Cloudflare R2, and DigitalOcean Spaces.
 
@@ -39,6 +39,7 @@ STORAGE_S3_SECRET_ACCESS_KEY=...
 
 Assets that are no longer referenced by any document should be cleaned periodically.
 Operators can schedule a job that:
+
 1. Lists all storage keys under the namespace.
 2. Cross-references with the document asset references in the database.
 3. Deletes orphaned objects older than a configurable grace period (default: 7 days).
@@ -63,6 +64,7 @@ Operators can schedule a job that:
 ### Backup Prerequisites
 
 Before any production migration:
+
 1. Take a full database backup (`pg_dump` or managed snapshot).
 2. Verify the backup can be restored to a clean instance.
 3. Document the rollback path.
